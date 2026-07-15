@@ -63,6 +63,21 @@ async def upload_document(
     return {"id": doc.id, "title": doc.title, "category": doc.category, "indexed": True}
 
 
+@router.post("/index/{doc_id}")
+async def index_document(doc_id: int, db: AsyncSession = Depends(get_db)):
+    """将指定文档索引到 Milvus（供主 Backend 上传后调用）"""
+    try:
+        result = await policy_rag_agent.index_document(doc_id, db)
+        return {
+            "doc_id": doc_id,
+            "indexed": True,
+            "chunks": result.get("chunks", 0),
+            "parents": result.get("parents", 0),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"索引失败: {str(e)}")
+
+
 @router.get("")
 async def list_documents(db: AsyncSession = Depends(get_db)):
     """获取所有制度文档列表"""

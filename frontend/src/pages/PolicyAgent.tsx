@@ -80,7 +80,7 @@ export default function PolicyAgent() {
     setUploading(true)
     try {
       const result = await policyApi.documents.upload(docForm.title, docForm.category, file)
-      alert(`文档 "${result.title}" 上传并索引成功`)
+      alert(`文档 "${docForm.title}" 已上传，正在后台索引到向量库...`)
       const docs = await policyApi.documents.list()
       setDocuments(docs)
     } catch (e: any) {

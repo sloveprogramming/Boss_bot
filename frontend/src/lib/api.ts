@@ -137,6 +137,7 @@ export const policyApi = {
         if (!reader) { reject(new Error('No reader')); return }
         const decoder = new TextDecoder()
         let buffer = ''
+        let currentEvent = ''
 
         while (true) {
           const { done, value } = await reader.read()
@@ -146,19 +147,21 @@ export const policyApi = {
           buffer = lines.pop() || ''
           for (const line of lines) {
             if (line.startsWith('event: ')) {
-              // 存储事件类型，下一个 data 行配对使用
-              const eventType = line.slice(7).trim()
-              // 简单实现：event 和 data 配对
-              ;(line as any)._eventType = eventType
+              currentEvent = line.slice(7).trim()
             } else if (line.startsWith('data: ')) {
               try {
                 const dataStr = line.slice(6)
                 const payload = JSON.parse(dataStr)
-                if (onEvent) {
-                  onEvent('token', payload) // fallback, 用 token 类型
+                if (currentEvent === 'done') {
+                  if (payload.sources && onEvent) onEvent('sources', { sources: payload.sources })
+                  resolve()
+                  return
                 }
-                if (payload.text) {
-                  onToken(payload.text)
+                if (currentEvent === 'token' || !currentEvent) {
+                  if (payload.text) onToken(payload.text)
+                }
+                if (onEvent && currentEvent) {
+                  onEvent(currentEvent, payload)
                 }
               } catch {
                 // skip invalid JSON

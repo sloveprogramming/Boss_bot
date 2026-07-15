@@ -1,24 +1,27 @@
-"""企业制度文档管理 API — 仅负责文档入库
-
-RAG 问答、检索、聊天功能已迁移至 rag_service。
-本模块仅保留向数据库存储文档内容的入口，
-后续由 rag_service 负责索引到 Milvus 向量库。
-"""
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
-from sqlalchemy import select
+"""企业制度文档管理 API — 文档入库 + 自动索引 + 简单问答"""
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi.responses import StreamingResponse
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.policy import PolicyDocument
+from pydantic import BaseModel
+from typing import Optional
 
-router = APIRouter(prefix="/api/policy", tags=["制度文档入库"])
+router = APIRouter(prefix="/api/policy", tags=["制度文档"])
+
+
+class ChatRequest(BaseModel):
+    message: str
+    session_id: Optional[str] = None
 
 
 # ========== 文档入库 ==========
 
 @router.post("/documents/upload")
 async def upload_document(
-    title: str,
-    category: str = "",
+    title: str = Form(...),
+    category: str = Form(""),
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
 ):
@@ -47,7 +50,7 @@ async def upload_document(
     else:
         raise HTTPException(status_code=400, detail=f"不支持的文件类型: {ext}")
 
-    # 保存文档记录（仅入库，不做向量索引）
+    # 保存文档记录
     doc_record = PolicyDocument(
         title=title,
         category=category or "未分类",
@@ -58,13 +61,30 @@ async def upload_document(
     await db.flush()
     await db.refresh(doc_record)
 
+    # 后台异步索引到 Milvus
+    import asyncio
+    asyncio.create_task(_index_document_bg(doc_record.id))
+
     return {
         "id": doc_record.id,
         "title": doc_record.title,
         "category": doc_record.category,
         "file_name": file.filename,
-        "message": "文档已入库。如需索引到向量库，请调用 rag_service 的 /api/documents/reindex 接口。",
+        "message": "文档已保存，正在后台索引到向量库...",
     }
+
+
+async def _index_document_bg(doc_id: int):
+    """后台任务：在线程中执行同步索引（避免 asyncio 冲突）"""
+    import asyncio
+    from app.services.milvus_indexer import index_document_sync
+
+    loop = asyncio.get_event_loop()
+    try:
+        chunks = await loop.run_in_executor(None, index_document_sync, doc_id)
+        print(f"[索引完成] doc_id={doc_id}, chunks={chunks}")
+    except Exception as e:
+        print(f"[索引失败] doc_id={doc_id}: {e}")
 
 
 # ========== 文档列表 ==========
@@ -102,3 +122,100 @@ async def delete_document(doc_id: int, db: AsyncSession = Depends(get_db)):
     await db.delete(doc)
     await db.flush()
     return {"status": "deleted", "doc_id": doc_id}
+
+
+# ========== 简单问答（关键词匹配，不依赖 Milvus） ==========
+
+@router.post("/chat")
+async def chat_with_docs(data: ChatRequest, db: AsyncSession = Depends(get_db)):
+    """基于已入库文档的关键词匹配问答"""
+    # 从 MySQL 搜索包含关键词的文档片段
+    keywords = data.message.strip()
+    if len(keywords) < 2:
+        return {"answer": "请输入更具体的问题。", "cited_sources": []}
+
+    result = await db.execute(
+        select(PolicyDocument).where(
+            PolicyDocument.content.contains(keywords[:50])
+        ).limit(3)
+    )
+    docs = result.scalars().all()
+
+    if not docs:
+        # 尝试用 LLM 直接回答
+        from app.agents.llm_client import llm_client
+        answer = await llm_client.chat(
+            system="你是一个企业制度助手。如果知识库中没有相关信息，请诚实告知。",
+            messages=[{"role": "user", "content": data.message}],
+            temperature=0.3, max_tokens=1024,
+        )
+        return {
+            "answer": answer,
+            "cited_sources": [],
+            "confidence": "low",
+        }
+
+    # 拼接检索到的内容
+    context = "\n\n".join(d.content[:2000] for d in docs if d.content)
+    from app.agents.llm_client import llm_client
+    answer = await llm_client.chat(
+        system="你是企业制度助手。请基于提供的文档内容回答问题，引用来源时注明文档标题。",
+        messages=[{"role": "user", "content": f"参考文档:\n{context}\n\n问题: {data.message}"}],
+        temperature=0.3, max_tokens=1024,
+    )
+
+    return {
+        "answer": answer,
+        "cited_sources": [{"title": d.title, "category": d.category} for d in docs],
+        "confidence": "medium",
+    }
+
+
+@router.post("/chat/stream")
+async def chat_with_docs_stream(data: ChatRequest, db: AsyncSession = Depends(get_db)):
+    """SSE 流式问答"""
+    import json
+
+    async def generate():
+        keywords = data.message.strip()
+        if len(keywords) < 2:
+            yield f"event: done\ndata: {json.dumps({'answer': '请输入更具体的问题。'}, ensure_ascii=False)}\n\n"
+            return
+
+        # 从 MySQL 搜索
+        result = await db.execute(
+            select(PolicyDocument).where(
+                PolicyDocument.content.contains(keywords[:50])
+            ).limit(3)
+        )
+        docs = result.scalars().all()
+
+        if not docs:
+            from app.agents.llm_client import llm_client
+            async for chunk in llm_client.stream_chat(
+                system="你是一个企业制度助手。如果知识库中没有相关信息，请诚实告知。",
+                messages=[{"role": "user", "content": data.message}],
+                temperature=0.3,
+            ):
+                yield f"event: token\ndata: {json.dumps({'text': chunk}, ensure_ascii=False)}\n\n"
+            yield f"event: done\ndata: {json.dumps({'message': '完成'}, ensure_ascii=False)}\n\n"
+            return
+
+        context = "\n\n".join(d.content[:2000] for d in docs if d.content)
+        yield f"event: sources\ndata: {json.dumps({'sources': [{'title': d.title} for d in docs]}, ensure_ascii=False)}\n\n"
+
+        from app.agents.llm_client import llm_client
+        async for chunk in llm_client.stream_chat(
+            system="你是企业制度助手。请基于提供的文档内容回答问题。",
+            messages=[{"role": "user", "content": f"参考文档:\n{context}\n\n问题: {data.message}"}],
+            temperature=0.3,
+        ):
+            yield f"event: token\ndata: {json.dumps({'text': chunk}, ensure_ascii=False)}\n\n"
+
+        yield f"event: done\ndata: {json.dumps({'message': '完成', 'sources': [{'title': d.title} for d in docs]}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )

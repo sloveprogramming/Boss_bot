@@ -33,12 +33,14 @@ class ExamAnalysisService:
         try:
             async with httpx.AsyncClient(timeout=120) as client:
                 payload = {
-                    "inputs": {"exam_data": exam_data},
+                    "inputs": {},
+                    "query": json.dumps(exam_data, ensure_ascii=False),
                     "response_mode": "blocking",
                     "user": "system",
+                    "conversation_id": "",
                 }
                 resp = await client.post(
-                    f"{settings.DIFY_API_URL}/workflows/run",
+                    f"{settings.DIFY_API_URL}/chat-messages",
                     headers={
                         "Authorization": f"Bearer {settings.DIFY_API_KEY}",
                         "Content-Type": "application/json",
@@ -48,10 +50,21 @@ class ExamAnalysisService:
                 resp.raise_for_status()
                 result = resp.json()
 
-                # 解析 Dify workflow 输出
-                if result.get("data") and result["data"].get("outputs"):
-                    return result["data"]["outputs"]
-                return self._mock_analysis(exam_data)
+                # 解析 Dify chat 输出
+                answer = result.get("answer", "{}")
+                try:
+                    parsed = json.loads(answer)
+                    if isinstance(parsed, dict) and any(k in parsed for k in ["overall_score", "strengths", "suggestion"]):
+                        return parsed
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+                # 没有结构化输出，包装为基本格式
+                return {
+                    "overall_score": exam_data.get("score", 0),
+                    "summary": answer[:500],
+                    "suggestion": answer[:500],
+                }
 
         except Exception as e:
             logger.error(f"Dify API 调用失败: {e}")
