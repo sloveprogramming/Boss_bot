@@ -1,0 +1,36 @@
+# Web 框架
+fastapi>=0.139.0
+uvicorn[standard]>=0.51.0
+pydantic>=2.13.0
+pydantic-settings>=2.14.0
+
+# 数据库
+sqlalchemy>=2.0.51
+aiosqlite>=0.22.0
+
+# LLM
+openai>=2.45.0
+
+# 向量数据库 / RAG
+pymilvus>=2.6.0,<3.0
+milvus-model>=0.1.0
+tiktoken>=0.13.0
+
+# 文档解析
+python-docx>=1.2.0
+PyMuPDF>=1.28.0
+
+# 本地 Embedding 模型
+sentence-transformers>=5.6.0
+
+# 分块
+langchain-text-splitters>=1.1.0
+langchain-core>=1.4.0
+
+# 缓存
+redis>=8.0.0
+
+# 工具
+httpx>=0.28.0
+python-multipart>=0.0.32
+numpy>=2.5.0

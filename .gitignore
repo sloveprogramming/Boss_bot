@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Environment
+.env
+*.db
+*.db-journal
+milvus_data/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Node
+node_modules/
+frontend/dist/
+frontend/.next/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-data/
+
+# Uploads
+uploads/
+dco_document/
+
+# Alembic
+migrations/versions/*.pyc
+
+# Virtualenv
+.venv/
+venv/
+env/
+
+# Coverage
+.coverage
+htmlcov/
+
+# WorkBuddy
+.workbuddy/

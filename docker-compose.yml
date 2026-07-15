@@ -1,0 +1,102 @@
+# AI 招聘助手 — 精简架构一键部署
+# 旧微服务 Agent（orchestrator, resume-parser, classifier, analyzers）已废弃
+# 招聘流程引擎已内嵌至 Backend (LangGraph)
+# 端口: backend=18000, rag-service=18003, frontend=18016
+
+services:
+  # ==================== 主后端（招聘流程引擎） ====================
+  backend:
+    build: ./backend
+    ports:
+      - "18000:18000"
+    environment: &llm_env
+      - LLM_PROVIDER=${LLM_PROVIDER:-openai}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.deepseek.com}
+      - OPENAI_MODEL=${OPENAI_MODEL:-deepseek-v4-flash}
+      - MILVUS_HOST=milvus-standalone
+      - MILVUS_PORT=19530
+      - DATABASE_URL=${DATABASE_URL:-sqlite+aiosqlite:///./data/recruit.db}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+    volumes:
+      - sqlite_data:/app/data
+      - backend_uploads:/app/uploads
+    depends_on:
+      milvus-standalone:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ==================== RAG 服务（企业制度智能问答） ====================
+  rag-service:
+    build: ./rag_service
+    ports:
+      - "18003:18003"
+    environment:
+      <<: *llm_env
+      - MILVUS_HOST=milvus-standalone
+      - MILVUS_PORT=19530
+      - DATABASE_URL=${DATABASE_URL:-sqlite+aiosqlite:///./data/recruit.db}
+    volumes:
+      - sqlite_data:/app/data
+    depends_on:
+      milvus-standalone:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ==================== 前端 ====================
+  frontend:
+    build: ./frontend
+    ports:
+      - "18016:18016"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # ==================== 向量数据库 (Milvus + MinIO) ====================
+  minio:
+    container_name: milvus-minio
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/minio_data
+    command: minio server /minio_data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  milvus-standalone:
+    container_name: milvus
+    image: milvusdb/milvus:v2.4.0
+    command: ["milvus", "run", "standalone"]
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    environment:
+      ETCD_USE_EMBED: "true"
+      MINIO_ADDRESS: minio:9000
+    volumes:
+      - milvus_data:/var/lib/milvus
+    depends_on:
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
+
+volumes:
+  sqlite_data:
+  backend_uploads:
+  milvus_data:
+  minio_data:
