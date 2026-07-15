@@ -1,27 +1,30 @@
 """企业规章制度 RAG Agent — 混合检索 + 双层分块 + CrossEncoder 重排序
 
-优化点（相对于原版）：
-  1. BGE-M3 混合检索（稠密向量 + 稀疏向量），替换单路稠密检索
-  2. Parent-Child 双层分块，子块检索 + 父块返回
-  3. CrossEncoder 重排序提升 Top-K 精度
-  4. 中文优化分句器（中文专用分隔符）
-  5. 查询分类（规则 + LLM 混合），非制度问题跳过检索
-  6. 语义缓存（Redis + embedding），热点问题直接返回
-"""
-import json
-import os
-import hashlib
-import logging
-import re
-from typing import Optional, List
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+完整 RAG 流水线：
+  index: 文档 → 双层分块(父1200/子300) → BGE-M3 向量化 → Milvus(dense+sparse)
+  query: 问题 → 查询分类 → 混合检索 → 子块命中 → 父块去重 → CrossEncoder 重排 → LLM 回答
 
-from app.agents.prompts import POLICY_AGENT_SYSTEM, POLICY_AGENT_PROMPT
-from app.agents.llm_client import llm_client
-from app.models.policy import PolicyDocument, PolicyChatHistory
-from app.services.policy_text_splitter import PolicyParentChildSplitter
-from app.services.semantic_cache import semantic_cache
+优化要点：
+  - BGE-M3 混合检索（稠密向量 + 稀疏向量），替换单路稠密检索
+  - Parent-Child 双层分块：子块用作检索匹配（300字），父块用作 LLM 上下文（1200字）
+  - CrossEncoder 重排序：初检 Top-K 后再精排，提升精度
+  - 语义缓存：Redis + embedding 相似度，热点问题直接返回（跳过检索+LLM）
+  - 查询分类：关键词规则 + LLM 兜底，非制度问题跳过检索节省开销
+"""
+import json                                                      # 解析/序列化 JSON
+import os
+import hashlib                                                   # MD5 生成唯一 chunk ID
+import logging                                                   # 日志
+import re                                                        # 正则（查询分类）
+from typing import Optional, List
+from sqlalchemy import select                                    # 数据库查询
+from sqlalchemy.ext.asyncio import AsyncSession                  # 异步数据库会话
+
+from app.agents.prompts import POLICY_AGENT_SYSTEM, POLICY_AGENT_PROMPT  # 制度问答提示词
+from app.agents.llm_client import llm_client                     # 全局 LLM 客户端
+from app.models.policy import PolicyDocument, PolicyChatHistory  # 数据库模型
+from app.services.policy_text_splitter import PolicyParentChildSplitter  # 中文分句器
+from app.services.semantic_cache import semantic_cache            # 热点问题缓存
 
 logger = logging.getLogger(__name__)
 

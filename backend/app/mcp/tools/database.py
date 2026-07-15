@@ -1,91 +1,72 @@
 """MCP 数据库查询 Tools — 候选人、面试、仪表盘统计
 
-所有函数返回结构化 JSON 字符串，供 LLM 消费。
-工具函数可被 MCP Server (stdio) 或 LangGraph Function Calling 节点直接调用。
-
-所有导入均为懒加载，避免导入链触发 services/__init__.py。
+5 个工具函数，全部返回结构化 JSON 字符串。
+可被 MCP Server (stdio) 或 LangGraph Function Calling 节点直接调用。
+所有 SQLAlchemy 导入均为懒加载，避免触发 services/__init__.py。
 """
 from typing import Optional
-import json
+import json                                                    # 所有返回值序列化为 JSON 字符串
 
 
 async def _get_db():
-    """创建独立的数据库会话（MCP 工具内部使用）"""
-    from app.database import async_session_factory
+    """创建独立的数据库会话 — 每次工具调用新建一个连接"""
+    from app.database import async_session_factory              # 懒加载
     return async_session_factory()
 
 
-# ===== 候选人查询 =====
+# ===== 工具 1: 搜候选人 =====
 
 async def query_candidates(
-    name: Optional[str] = None,
-    position: Optional[str] = None,
-    status: Optional[str] = None,
-    job_category: Optional[str] = None,
-    min_score: Optional[float] = None,
-    max_score: Optional[float] = None,
-    page: int = 1,
-    page_size: int = 20,
-) -> str:
-    """搜索/筛选候选人列表。
-
-    支持按姓名、岗位、状态、类别、匹配度范围筛选。
-
-    Args:
-        name: 候选人姓名（模糊匹配）
-        position: 应聘岗位（模糊匹配）
-        status: 状态：new/analyzed/talent_pool/q_sent/q_done/scheduled/interviewed/hired/rejected
-        job_category: 岗位类别：python/java/product/ai/frontend/ops/test
-        min_score: 最低匹配度分数
-        max_score: 最高匹配度分数
-        page: 页码（从1开始）
-        page_size: 每页条数（默认20）
-
-    Returns:
-        JSON 字符串：{total, page, page_size, candidates: [...]}
-    """
-    from sqlalchemy import select, func
+    name: Optional[str] = None,                                # 姓名模糊匹配
+    position: Optional[str] = None,                            # 岗位模糊匹配
+    status: Optional[str] = None,                              # 状态精确匹配
+    job_category: Optional[str] = None,                        # 类别精确匹配
+    min_score: Optional[float] = None,                         # 最低分
+    max_score: Optional[float] = None,                         # 最高分
+    page: int = 1,                                             # 页码
+    page_size: int = 20,                                       # 每页条数
+) -> str:                                                      # 返回 JSON 字符串
+    """搜索/筛选候选人列表 — 支持多条件组合 + 分页"""
+    from sqlalchemy import select, func                        # 懒加载
     from app.models.candidate import Candidate
 
-    db = await _get_db()
+    db = await _get_db()                                       # 建独立数据库会话
     try:
-        query = select(Candidate)
-        count_query = select(func.count(Candidate.id))
+        query = select(Candidate)                              # 主查询
+        count_query = select(func.count(Candidate.id))          # 计数查询（分页需要总数）
 
-        if name:
+        # 逐条件叠加筛选（同名条件同时在主查询和计数查询上叠加）
+        if name:                                               # 姓名模糊
             query = query.where(Candidate.name.contains(name))
             count_query = count_query.where(Candidate.name.contains(name))
-        if position:
+        if position:                                           # 岗位模糊
             query = query.where(Candidate.position.contains(position))
             count_query = count_query.where(Candidate.position.contains(position))
-        if status:
+        if status:                                             # 状态精确
             query = query.where(Candidate.status == status)
             count_query = count_query.where(Candidate.status == status)
-        if job_category:
+        if job_category:                                       # 类别精确
             query = query.where(Candidate.job_category == job_category)
             count_query = count_query.where(Candidate.job_category == job_category)
-        if min_score is not None:
+        if min_score is not None:                              # 最低分
             query = query.where(Candidate.match_score >= min_score)
             count_query = count_query.where(Candidate.match_score >= min_score)
-        if max_score is not None:
+        if max_score is not None:                              # 最高分
             query = query.where(Candidate.match_score <= max_score)
             count_query = count_query.where(Candidate.match_score <= max_score)
 
-        total = (await db.execute(count_query)).scalar() or 0
-        query = query.order_by(Candidate.created_at.desc())
-        query = query.offset((page - 1) * page_size).limit(page_size)
-        result = await db.execute(query)
+        total = (await db.execute(count_query)).scalar() or 0  # 执行计数
+        query = query.order_by(Candidate.created_at.desc())    # 最新在前
+        query = query.offset((page - 1) * page_size).limit(page_size)  # 分页
+        result = await db.execute(query)                       # 执行查询
         candidates = result.scalars().all()
 
-        items = []
+        items = []                                             # 构建返回列表
         for c in candidates:
             items.append({
-                "id": c.id,
-                "name": c.name,
-                "email": c.email,
-                "phone": c.phone,
-                "position": c.position,
-                "status": c.status,
+                "id": c.id, "name": c.name,
+                "email": c.email, "phone": c.phone,
+                "position": c.position, "status": c.status,
                 "job_category": c.job_category,
                 "match_score": c.match_score,
                 "tags": c.tags or [],
@@ -94,24 +75,17 @@ async def query_candidates(
             })
 
         return json.dumps({
-            "total": total,
-            "page": page,
-            "page_size": page_size,
+            "total": total, "page": page, "page_size": page_size,
             "candidates": items,
-        }, ensure_ascii=False)
+        }, ensure_ascii=False)                                 # 中文不转义
     finally:
-        await db.close()
+        await db.close()                                       # 用完关闭连接
 
+
+# ===== 工具 2: 候选人详情 =====
 
 async def get_candidate_detail(candidate_id: int) -> str:
-    """获取候选人完整信息，包括简历分析结果、面试记录、通知历史。
-
-    Args:
-        candidate_id: 候选人 ID
-
-    Returns:
-        JSON 字符串：候选人完整信息
-    """
+    """获取候选人完整信息 — 简历分析 + 面试记录 + 通知历史"""
     from sqlalchemy import select
     from app.models.candidate import Candidate
     from app.models.resume import Resume
@@ -124,22 +98,22 @@ async def get_candidate_detail(candidate_id: int) -> str:
             select(Candidate).where(Candidate.id == candidate_id)
         )
         candidate = result.scalar_one_or_none()
-        if not candidate:
+        if not candidate:                                      # 候选人不存在
             return json.dumps({"error": f"候选人不存在: {candidate_id}"}, ensure_ascii=False)
 
-        # 查询简历分析
+        # 查简历分析（可能为空）
         resume_result = await db.execute(
             select(Resume).where(Resume.candidate_id == candidate_id)
         )
         resume = resume_result.scalar_one_or_none()
 
-        # 查询面试记录
+        # 查所有面试记录
         interview_result = await db.execute(
             select(Interview).where(Interview.candidate_id == candidate_id)
         )
         interviews = interview_result.scalars().all()
 
-        # 查询通知历史
+        # 查最近 10 条通知
         notif_result = await db.execute(
             select(Notification)
             .where(Notification.candidate_id == candidate_id)
@@ -150,12 +124,9 @@ async def get_candidate_detail(candidate_id: int) -> str:
 
         return json.dumps({
             "candidate": {
-                "id": candidate.id,
-                "name": candidate.name,
-                "email": candidate.email,
-                "phone": candidate.phone,
-                "position": candidate.position,
-                "status": candidate.status,
+                "id": candidate.id, "name": candidate.name,
+                "email": candidate.email, "phone": candidate.phone,
+                "position": candidate.position, "status": candidate.status,
                 "job_category": candidate.job_category,
                 "match_score": candidate.match_score,
                 "experience_years": candidate.experience_years,
@@ -165,34 +136,27 @@ async def get_candidate_detail(candidate_id: int) -> str:
                 "created_at": candidate.created_at.isoformat() if candidate.created_at else "",
                 "updated_at": candidate.updated_at.isoformat() if candidate.updated_at else "",
             },
-            "resume": {
+            "resume": {                                        # 简历分析（可能为空）
                 "id": resume.id,
                 "raw_text": resume.raw_text[:500] if resume and resume.raw_text else "",
                 "analysis_result": resume.analysis_result if resume else None,
                 "match_analysis": resume.match_analysis if resume else None,
                 "summary": resume.summary if resume else "",
             } if resume else None,
-            "interviews": [
+            "interviews": [                                    # 面试记录列表
                 {
-                    "id": i.id,
-                    "round": i.round,
-                    "status": i.status,
+                    "id": i.id, "round": i.round, "status": i.status,
                     "interviewers": i.interviewers or [],
                     "confirmed_start": i.confirmed_start.isoformat() if i.confirmed_start else None,
-                    "location": i.location,
-                    "meeting_link": i.meeting_link,
-                    "feedback": i.feedback,
-                    "ai_summary": i.ai_summary,
+                    "location": i.location, "meeting_link": i.meeting_link,
+                    "feedback": i.feedback, "ai_summary": i.ai_summary,
                 }
                 for i in interviews
             ],
-            "recent_notifications": [
+            "recent_notifications": [                          # 最近通知
                 {
-                    "id": n.id,
-                    "type": n.type,
-                    "template": n.template,
-                    "status": n.status,
-                    "subject": n.subject,
+                    "id": n.id, "type": n.type, "template": n.template,
+                    "status": n.status, "subject": n.subject,
                     "sent_at": n.sent_at.isoformat() if n.sent_at else None,
                 }
                 for n in notifications
@@ -202,29 +166,17 @@ async def get_candidate_detail(candidate_id: int) -> str:
         await db.close()
 
 
-# ===== 面试查询 =====
+# ===== 工具 3: 查面试 =====
 
-async def query_interviews(
+async def query_interviews(                                    # 同上模式，查 Interview 表
     status: Optional[str] = None,
-    date_from: Optional[str] = None,
+    date_from: Optional[str] = None,                           # ISO 日期字符串 "2026-07-01"
     date_to: Optional[str] = None,
-    round_filter: Optional[str] = None,
+    round_filter: Optional[str] = None,                        # first/technical/hr/final
     page: int = 1,
     page_size: int = 20,
 ) -> str:
-    """查询面试安排列表。
-
-    Args:
-        status: 面试状态：pending/awaiting_confirm/confirmed/completed/cancelled
-        date_from: 面试日期起始 (ISO 格式，如 "2026-07-01")
-        date_to: 面试日期截止
-        round_filter: 面试轮次：first/technical/hr/final
-        page: 页码
-        page_size: 每页条数
-
-    Returns:
-        JSON 字符串：{total, interviews: [...]}
-    """
+    """查询面试安排列表 — 按状态/日期/轮次筛选"""
     from datetime import datetime as dt
     from sqlalchemy import select, func
     from app.models.interview import Interview
@@ -235,20 +187,10 @@ async def query_interviews(
         query = select(Interview)
         count_query = select(func.count(Interview.id))
 
-        if status:
-            query = query.where(Interview.status == status)
-            count_query = count_query.where(Interview.status == status)
-        if round_filter:
-            query = query.where(Interview.round == round_filter)
-            count_query = count_query.where(Interview.round == round_filter)
-        if date_from:
-            d = dt.fromisoformat(date_from)
-            query = query.where(Interview.confirmed_start >= d)
-            count_query = count_query.where(Interview.confirmed_start >= d)
-        if date_to:
-            d = dt.fromisoformat(date_to)
-            query = query.where(Interview.confirmed_start <= d)
-            count_query = count_query.where(Interview.confirmed_start <= d)
+        if status: query = query.where(Interview.status == status); count_query = count_query.where(Interview.status == status)
+        if round_filter: query = query.where(Interview.round == round_filter); count_query = count_query.where(Interview.round == round_filter)
+        if date_from: d = dt.fromisoformat(date_from); query = query.where(Interview.confirmed_start >= d); count_query = count_query.where(Interview.confirmed_start >= d)
+        if date_to: d = dt.fromisoformat(date_to); query = query.where(Interview.confirmed_start <= d); count_query = count_query.where(Interview.confirmed_start <= d)
 
         total = (await db.execute(count_query)).scalar() or 0
         query = query.order_by(Interview.created_at.desc())
@@ -258,46 +200,29 @@ async def query_interviews(
 
         items = []
         for i in interviews:
-            # 获取候选人姓名
-            cand_result = await db.execute(
-                select(Candidate.name).where(Candidate.id == i.candidate_id)
-            )
+            cand_result = await db.execute(select(Candidate.name).where(Candidate.id == i.candidate_id))
             cand_name = cand_result.scalar_one_or_none() or "未知"
 
             items.append({
-                "id": i.id,
-                "candidate_id": i.candidate_id,
+                "id": i.id, "candidate_id": i.candidate_id,
                 "candidate_name": cand_name,
-                "round": i.round,
-                "status": i.status,
+                "round": i.round, "status": i.status,
                 "interviewers": i.interviewers or [],
                 "confirmed_start": i.confirmed_start.isoformat() if i.confirmed_start else None,
                 "confirmed_end": i.confirmed_end.isoformat() if i.confirmed_end else None,
-                "location": i.location,
-                "meeting_link": i.meeting_link,
-                "feedback": i.feedback,
-                "ai_summary": i.ai_summary,
+                "location": i.location, "meeting_link": i.meeting_link,
+                "feedback": i.feedback, "ai_summary": i.ai_summary,
             })
 
-        return json.dumps({
-            "total": total,
-            "page": page,
-            "page_size": page_size,
-            "interviews": items,
-        }, ensure_ascii=False)
+        return json.dumps({"total": total, "page": page, "page_size": page_size, "interviews": items}, ensure_ascii=False)
     finally:
         await db.close()
 
 
-# ===== 仪表盘统计 =====
+# ===== 工具 4: 仪表盘统计 =====
 
 async def get_dashboard_stats() -> str:
-    """获取招聘仪表盘统计数据。
-
-    Returns:
-        JSON 字符串：{total_candidates, status_distribution, avg_match_score,
-                       today_new, weekly_trend, job_category_distribution}
-    """
+    """获取招聘仪表盘全景数据 — 总数/新增/分布/平均分/录用率/岗位分布"""
     from datetime import datetime as dt, timedelta
     from sqlalchemy import select, func
     from app.models.candidate import Candidate
@@ -305,67 +230,30 @@ async def get_dashboard_stats() -> str:
 
     db = await _get_db()
     try:
-        today = dt.utcnow().date()
-
-        # 总数
-        total = (await db.execute(select(func.count(Candidate.id)))).scalar() or 0
-
-        # 今日新增
-        today_start = dt.combine(today, dt.min.time())
-        today_new = (await db.execute(
-            select(func.count(Candidate.id))
-            .where(Candidate.created_at >= today_start)
-        )).scalar() or 0
-
-        # 状态分布
-        status_result = await db.execute(
-            select(Candidate.status, func.count(Candidate.id))
-            .group_by(Candidate.status)
-        )
-        status_dist = {row[0]: row[1] for row in status_result.all()}
-
-        # 平均匹配度
-        avg_score = (await db.execute(
-            select(func.avg(Candidate.match_score))
-            .where(Candidate.match_score.isnot(None))
-        )).scalar() or 0
-        avg_score = round(float(avg_score), 1)
-
-        # 岗位类别分布
-        cat_result = await db.execute(
-            select(Candidate.job_category, func.count(Candidate.id))
-            .where(Candidate.job_category.isnot(None))
-            .group_by(Candidate.job_category)
-        )
-        job_categories = {row[0]: row[1] for row in cat_result.all()}
-
-        # 录用率
-        hired_count = status_dist.get("hired", 0)
-        completed = sum(status_dist.values()) - status_dist.get("new", 0) - status_dist.get("archived", 0)
-        hire_rate = round(hired_count / completed * 100, 1) if completed > 0 else 0
-
-        # 本周趋势
-        week_ago = today - timedelta(days=7)
+        today = dt.utcnow().date()                             # 今天日期
+        today_start = dt.combine(today, dt.min.time())         # 今天 0 点
+        week_ago = today - timedelta(days=7)                   # 7 天前
         week_start = dt.combine(week_ago, dt.min.time())
-        weekly_new = (await db.execute(
-            select(func.count(Candidate.id))
-            .where(Candidate.created_at >= week_start)
-        )).scalar() or 0
 
-        # 面试待办
-        interviews_pending = (await db.execute(
-            select(func.count(Interview.id))
-            .where(Interview.status.in_(["pending", "awaiting_confirm", "confirmed"]))
-        )).scalar() or 0
+        # 各维度查询
+        total = (await db.execute(select(func.count(Candidate.id)))).scalar() or 0
+        today_new = (await db.execute(select(func.count(Candidate.id)).where(Candidate.created_at >= today_start))).scalar() or 0
+        status_result = await db.execute(select(Candidate.status, func.count(Candidate.id)).group_by(Candidate.status))
+        status_dist = {row[0]: row[1] for row in status_result.all()}
+        avg_score = round(float((await db.execute(select(func.avg(Candidate.match_score)).where(Candidate.match_score.isnot(None)))).scalar() or 0), 1)
+        cat_result = await db.execute(select(Candidate.job_category, func.count(Candidate.id)).where(Candidate.job_category.isnot(None)).group_by(Candidate.job_category))
+        job_categories = {row[0]: row[1] for row in cat_result.all()}
+        hired_count = status_dist.get("hired", 0)
+        completed = sum(status_dist.values()) - status_dist.get("new", 0)
+        hire_rate = round(hired_count / completed * 100, 1) if completed > 0 else 0
+        weekly_new = (await db.execute(select(func.count(Candidate.id)).where(Candidate.created_at >= week_start))).scalar() or 0
+        interviews_pending = (await db.execute(select(func.count(Interview.id)).where(Interview.status.in_(["pending", "awaiting_confirm", "confirmed"])))).scalar() or 0
 
         return json.dumps({
-            "total_candidates": total,
-            "today_new": today_new,
+            "total_candidates": total, "today_new": today_new,
             "status_distribution": status_dist,
-            "avg_match_score": avg_score,
-            "hire_rate": hire_rate,
-            "weekly_new": weekly_new,
-            "interviews_pending": interviews_pending,
+            "avg_match_score": avg_score, "hire_rate": hire_rate,
+            "weekly_new": weekly_new, "interviews_pending": interviews_pending,
             "job_category_distribution": job_categories,
         }, ensure_ascii=False)
     finally:

@@ -48,8 +48,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 },
                 "job_category": {
                     "type": "string",
-                    "enum": ["python", "java", "product", "ai", "frontend", "ops", "test"],
-                    "description": "岗位类别",
+                    "description": "岗位类别，如 python/java/product/ai/frontend/ops/test/erp/外贸运营/数据分析/项目管理/销售/人力资源/运营",
                 },
                 "min_score": {
                     "type": "number",
