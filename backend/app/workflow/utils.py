@@ -18,9 +18,9 @@ async def get_candidate(db: AsyncSession, candidate_id: int) -> Optional[Candida
 
 @asynccontextmanager
 async def candidate_session(
-    candidate_id: int,
-    suppress_errors: bool = False,
-) -> AsyncGenerator[tuple[AsyncSession, Optional[Candidate]], None]:
+    candidate_id: int, # 候选人 ID
+    suppress_errors: bool = False, # 是否吞掉异常不抛出（用于非关键操作）
+) -> AsyncGenerator[tuple[AsyncSession, Optional[Candidate]], None]: # 异步生成器，返回数据库会话和候选人对象
     """上下文管理器：自动处理 开会话 → 查候选人 → 提交/回滚
 
     Args:
