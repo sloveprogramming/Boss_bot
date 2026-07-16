@@ -1,7 +1,7 @@
 """认证相关 Pydantic Schema"""
 from pydantic import BaseModel, Field
 from typing import Optional
-from app.models.user import UserRole
+from app.models import UserRole
 
 
 class LoginRequest(BaseModel):
@@ -19,11 +19,24 @@ class TokenResponse(BaseModel):
 
 
 class UserCreate(BaseModel):
-    """创建用户请求"""
+    """创建用户请求（自助注册）"""
     username: str = Field(..., min_length=2, max_length=100)
     password: str = Field(..., min_length=4, max_length=128)
     role: UserRole = UserRole.HR
     email: Optional[str] = None
+
+
+class SetupAdminRequest(BaseModel):
+    """系统初始化 — 创建首个管理员"""
+    username: str = Field(..., min_length=2, max_length=100)
+    password: str = Field(..., min_length=6, max_length=128, description="管理员密码（至少6位）")
+    email: Optional[str] = None
+
+
+class ChangePasswordRequest(BaseModel):
+    """修改密码请求"""
+    old_password: str = Field(..., min_length=4, max_length=128)
+    new_password: str = Field(..., min_length=4, max_length=128)
 
 
 class UserResponse(BaseModel):

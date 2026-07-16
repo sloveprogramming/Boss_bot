@@ -1,9 +1,11 @@
 // 应用布局组件：侧边导航 + 主内容区
-import { Outlet, NavLink, useLocation } from 'react-router-dom'
+import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import {
-  LayoutDashboard, Users, FileText, Calendar, Bot, GitBranch, ClipboardList, Menu, X, Sparkles
+  LayoutDashboard, Users, FileText, Calendar, Bot, GitBranch, ClipboardList,
+  Menu, X, Sparkles, LogOut, User as UserIcon, Shield, ChevronDown,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
+import { useAuth } from '../contexts/AuthContext'
 
 const navItems = [
   { path: '/', label: '仪表盘', icon: LayoutDashboard },
@@ -17,7 +19,36 @@ const navItems = [
 
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [userMenuOpen, setUserMenuOpen] = useState(false)
   const location = useLocation()
+  const navigate = useNavigate()
+  const { user, logout } = useAuth()
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  // 点击外部关闭用户菜单
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setUserMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  const handleLogout = () => {
+    logout()
+    navigate('/login', { replace: true })
+  }
+
+  const roleLabel: Record<string, { label: string; color: string }> = {
+    admin: { label: '管理员', color: 'bg-red-100 text-red-700' },
+    hr: { label: 'HR', color: 'bg-indigo-100 text-indigo-700' },
+    interviewer: { label: '面试官', color: 'bg-emerald-100 text-emerald-700' },
+    candidate: { label: '候选人', color: 'bg-amber-100 text-amber-700' },
+  }
+
+  const currentRole = roleLabel[user?.role || ''] || { label: user?.role || '', color: 'bg-gray-100 text-gray-600' }
 
   return (
     <div className="flex h-screen bg-gradient-to-br from-indigo-50/50 via-purple-50/30 to-cyan-50/40">
@@ -91,17 +122,38 @@ export default function Layout() {
           ))}
         </nav>
 
-        {/* 底部信息 */}
+        {/* 底部用户信息 */}
         <div className="p-4 border-t border-indigo-100/60">
-          <div className="flex items-center gap-3 px-2 py-2 rounded-xl bg-gradient-to-r from-indigo-50 to-purple-50">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white text-xs font-bold">
-              AI
+          {user ? (
+            <div className="flex items-center gap-3 px-2 py-2 rounded-xl bg-gradient-to-r from-indigo-50 to-purple-50">
+              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
+                <UserIcon className="w-4 h-4 text-white" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium text-gray-700 truncate">{user.username}</p>
+                <span className={`inline-block mt-0.5 px-1.5 py-0 rounded text-[10px] font-medium ${currentRole.color}`}>
+                  {currentRole.label}
+                </span>
+              </div>
+              <button
+                onClick={handleLogout}
+                className="p-1.5 rounded-lg hover:bg-white/80 text-gray-400 hover:text-red-500 transition-colors"
+                title="退出登录"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+              </button>
             </div>
-            <div>
-              <p className="text-xs font-medium text-gray-700">AI 招聘助手</p>
-              <p className="text-[10px] text-gray-400">v1.0.0</p>
+          ) : (
+            <div className="flex items-center gap-3 px-2 py-2 rounded-xl bg-gradient-to-r from-indigo-50 to-purple-50">
+              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white text-xs font-bold">
+                <Shield className="w-4 h-4" />
+              </div>
+              <div>
+                <p className="text-xs font-medium text-gray-700">未登录</p>
+                <p className="text-[10px] text-gray-400">请先登录</p>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </aside>
 
@@ -115,7 +167,13 @@ export default function Layout() {
           <span className="text-sm font-medium text-gray-600">
             {navItems.find(i => location.pathname === i.path || (i.path !== '/' && location.pathname.startsWith(i.path)))?.label || 'AI 招聘助手'}
           </span>
-          <div className="w-6" />
+          {user ? (
+            <button onClick={handleLogout} className="p-2 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500">
+              <LogOut className="w-4 h-4" />
+            </button>
+          ) : (
+            <div className="w-6" />
+          )}
         </header>
 
         {/* 桌面端顶部栏 */}
@@ -127,9 +185,49 @@ export default function Layout() {
               {navItems.find(i => location.pathname === i.path || (i.path !== '/' && location.pathname.startsWith(i.path)))?.label || '仪表盘'}
             </p>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-xs text-gray-400">系统运行中</span>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="text-xs text-gray-400">系统运行中</span>
+            </div>
+
+            {/* 用户菜单 */}
+            {user && (
+              <div ref={menuRef} className="relative">
+                <button
+                  onClick={() => setUserMenuOpen(!userMenuOpen)}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-xl hover:bg-gray-100 transition-colors"
+                >
+                  <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
+                    <UserIcon className="w-3.5 h-3.5 text-white" />
+                  </div>
+                  <div className="text-left">
+                    <p className="text-xs font-medium text-gray-700 leading-tight">{user.username}</p>
+                    <p className="text-[10px] text-gray-400 leading-tight">{currentRole.label}</p>
+                  </div>
+                  <ChevronDown className={`w-3.5 h-3.5 text-gray-400 transition-transform ${userMenuOpen ? 'rotate-180' : ''}`} />
+                </button>
+
+                {/* 下拉菜单 */}
+                {userMenuOpen && (
+                  <div className="absolute right-0 top-full mt-1 w-48 bg-white rounded-xl shadow-xl border border-gray-100 py-1 z-50">
+                    <div className="px-3 py-2 border-b border-gray-50">
+                      <p className="text-xs font-medium text-gray-700">{user.username}</p>
+                      <span className={`inline-block mt-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${currentRole.color}`}>
+                        {currentRole.label}
+                      </span>
+                    </div>
+                    <button
+                      onClick={handleLogout}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                    >
+                      <LogOut className="w-4 h-4" />
+                      退出登录
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </header>
 

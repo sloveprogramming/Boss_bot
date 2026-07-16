@@ -1,12 +1,10 @@
-"""问卷节点 — 简化版：仅发送固定链接
-
-不再生成题目、评分、催填。发送固定问卷链接后直接标记为通过。
-"""
+"""问卷节点 """
 from ..state import RecruitmentState
+from ..utils import candidate_session
 from app.database import async_session_factory
-from app.services.questionnaire_svc import questionnaire_service, QUESTIONNAIRE_LINK
+from app.services import questionnaire_service, QUESTIONNAIRE_LINK
 from app.config import settings
-from sqlalchemy import select
+from app.models import CandidateStatus
 
 
 async def generate_questionnaire_node(state: RecruitmentState) -> dict:
@@ -17,21 +15,10 @@ async def generate_questionnaire_node(state: RecruitmentState) -> dict:
     if not candidate_id:
         return {"errors": ["缺少 candidate_id"]}
 
-    # 快速通道 (>=80): 跳过问卷直接面试
     if match_score >= settings.SCORE_THRESHOLD_FAST_TRACK:
-        async with async_session_factory() as db:
-            try:
-                from app.models.candidate import Candidate
-                from app.models.candidate import CandidateStatus
-                result = await db.execute(
-                    select(Candidate).where(Candidate.id == candidate_id)
-                )
-                candidate = result.scalar_one_or_none()
-                if candidate:
-                    candidate.status = CandidateStatus.INTERVIEW_SCHEDULED.value
-                    await db.commit()
-            except Exception:
-                await db.rollback()
+        async with candidate_session(candidate_id, suppress_errors=True) as (db, candidate):
+            if candidate:
+                candidate.status = CandidateStatus.INTERVIEW_SCHEDULED.value
         return {
             "questionnaire_status": "skipped",
             "status": "q_done",
@@ -40,7 +27,6 @@ async def generate_questionnaire_node(state: RecruitmentState) -> dict:
             "notification": "快速通道：直接进入面试排期",
         }
 
-    # 普通通道：发送固定链接
     async with async_session_factory() as db:
         try:
             q = await questionnaire_service.send_questionnaire_link(

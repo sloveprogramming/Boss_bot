@@ -1,12 +1,8 @@
-"""人才池节点 — 低匹配度但有潜力的候选人进入人才池
-
-合并了旧系统中：
-1. agents/orchestrator 的 move_to_talent_pool_node
-2. backend/app/services/workflow.py 的 _move_to_talent_pool() 逻辑
-"""
+"""人才池节点"""
 from ..state import RecruitmentState
+from ..utils import get_candidate
 from app.database import async_session_factory
-from app.models.talent_pool import TalentPool, TalentPoolStatus
+from app.models import TalentPool, TalentPoolStatus
 
 
 async def move_to_talent_pool_node(state: RecruitmentState) -> dict:
@@ -22,22 +18,15 @@ async def move_to_talent_pool_node(state: RecruitmentState) -> dict:
     async with async_session_factory() as db:
         try:
             from sqlalchemy import select
-            from app.models.candidate import Candidate
 
-            # 获取候选人
-            result = await db.execute(
-                select(Candidate).where(Candidate.id == candidate_id)
-            )
-            candidate = result.scalar_one_or_none()
+            candidate = await get_candidate(db, candidate_id)
             if not candidate:
                 return {"errors": ["候选人不存在"]}
 
-            # 检查是否已有人才池记录
             existing = await db.execute(
                 select(TalentPool).where(TalentPool.candidate_id == candidate_id)
             )
             if existing.scalar_one_or_none():
-                # 已在人才池中
                 candidate.status = "talent_pool"
                 await db.commit()
                 return {
@@ -45,7 +34,6 @@ async def move_to_talent_pool_node(state: RecruitmentState) -> dict:
                     "pipeline_stage": "talent_pool",
                 }
 
-            # 提取技能和优势
             skills = candidate.tags or []
             if analysis and isinstance(analysis, dict):
                 skills = list(set(skills + analysis.get("skills", [])))
@@ -55,7 +43,6 @@ async def move_to_talent_pool_node(state: RecruitmentState) -> dict:
                 match_analysis = analysis.get("match_analysis", {}) if isinstance(analysis, dict) else {}
                 strengths = match_analysis.get("strengths", []) if isinstance(match_analysis, dict) else []
 
-            # 创建人才池记录
             pool_entry = TalentPool(
                 candidate_id=candidate_id,
                 original_position=position,
@@ -69,7 +56,6 @@ async def move_to_talent_pool_node(state: RecruitmentState) -> dict:
             db.add(pool_entry)
             await db.flush()
 
-            # 更新候选人
             candidate.status = "talent_pool"
             candidate.talent_pool_id = pool_entry.id
             candidate.talent_pool_reason = pool_entry.pool_reason

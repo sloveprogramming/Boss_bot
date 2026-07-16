@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 
 from app.database import get_db
-from app.models.llm_log import LLMCallLog
+from app.models import LLMCallLog
 
 router = APIRouter(prefix="/api/llm", tags=["LLM可观测性"])
 

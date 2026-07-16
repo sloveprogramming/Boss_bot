@@ -16,16 +16,11 @@ from app.config import settings
 from app.database import Base
 
 # 导入所有模型，确保 Base.metadata 包含全部表
-from app.models.candidate import Candidate
-from app.models.resume import Resume
-from app.models.interview import Interview
-from app.models.questionnaire import Questionnaire, QuestionnaireResponse
-from app.models.notification import Notification
-from app.models.policy import PolicyDocument, PolicyChatHistory
-from app.models.talent_pool import TalentPool
-from app.models.user import User
-from app.models.llm_log import LLMCallLog
-from app.models.exam_analysis import ExamAnalysis
+from app.models import (
+    Candidate, Resume, Interview, Questionnaire, QuestionnaireResponse, User, LLMCallLog,
+    Notification, PolicyDocument, PolicyChatHistory,
+    TalentPool, ExamAnalysis,
+)
 
 config = context.config
 if config.config_file_name is not None:

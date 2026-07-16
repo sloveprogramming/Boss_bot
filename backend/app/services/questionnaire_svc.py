@@ -5,8 +5,7 @@
 from datetime import datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.questionnaire import Questionnaire
-from app.models.candidate import Candidate
+from app.models import Questionnaire, Candidate
 from app.services.notification import notification_service
 
 

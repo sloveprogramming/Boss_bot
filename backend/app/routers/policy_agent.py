@@ -4,7 +4,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
-from app.models.policy import PolicyDocument
+from app.models import PolicyDocument
 from pydantic import BaseModel
 from typing import Optional
 
@@ -77,7 +77,7 @@ async def upload_document(
 async def _index_document_bg(doc_id: int):
     """后台任务：在线程中执行同步索引（避免 asyncio 冲突）"""
     import asyncio
-    from app.services.milvus_indexer import index_document_sync
+    from app.services import index_document_sync
 
     loop = asyncio.get_event_loop()
     try:
@@ -143,7 +143,7 @@ async def chat_with_docs(data: ChatRequest, db: AsyncSession = Depends(get_db)):
 
     if not docs:
         # 尝试用 LLM 直接回答
-        from app.agents.llm_client import llm_client
+        from app.agents import llm_client
         answer = await llm_client.chat(
             system="你是一个企业制度助手。如果知识库中没有相关信息，请诚实告知。",
             messages=[{"role": "user", "content": data.message}],
@@ -157,7 +157,7 @@ async def chat_with_docs(data: ChatRequest, db: AsyncSession = Depends(get_db)):
 
     # 拼接检索到的内容
     context = "\n\n".join(d.content[:2000] for d in docs if d.content)
-    from app.agents.llm_client import llm_client
+    from app.agents import llm_client
     answer = await llm_client.chat(
         system="你是企业制度助手。请基于提供的文档内容回答问题，引用来源时注明文档标题。",
         messages=[{"role": "user", "content": f"参考文档:\n{context}\n\n问题: {data.message}"}],
@@ -191,7 +191,7 @@ async def chat_with_docs_stream(data: ChatRequest, db: AsyncSession = Depends(ge
         docs = result.scalars().all()
 
         if not docs:
-            from app.agents.llm_client import llm_client
+            from app.agents import llm_client
             async for chunk in llm_client.stream_chat(
                 system="你是一个企业制度助手。如果知识库中没有相关信息，请诚实告知。",
                 messages=[{"role": "user", "content": data.message}],
@@ -204,7 +204,7 @@ async def chat_with_docs_stream(data: ChatRequest, db: AsyncSession = Depends(ge
         context = "\n\n".join(d.content[:2000] for d in docs if d.content)
         yield f"event: sources\ndata: {json.dumps({'sources': [{'title': d.title} for d in docs]}, ensure_ascii=False)}\n\n"
 
-        from app.agents.llm_client import llm_client
+        from app.agents import llm_client
         async for chunk in llm_client.stream_chat(
             system="你是企业制度助手。请基于提供的文档内容回答问题。",
             messages=[{"role": "user", "content": f"参考文档:\n{context}\n\n问题: {data.message}"}],

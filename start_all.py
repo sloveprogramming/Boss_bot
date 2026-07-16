@@ -25,15 +25,18 @@ services = [
 # ===== 独立 Agent 服务（可选） =====
 # LangGraph 节点优先调用独立 Agent，不可用时自动降级为内联逻辑。
 # 若不需要独立部署，可注释掉下方服务以节省资源。
+# 注：当前项目已精简为「Backend + RAG Service + Frontend」三件套，
+#     下方 Resume Parser / Classifier / Python Analyzer 等目录未独立部署，
+#     LangGraph 节点会自动降级到内联逻辑，不影响核心功能。
 INDEPENDENT_AGENTS = [
     ("RAG Service",       "18003", f"{BASE}/rag_service",
      ["python", "start.py"]),
-    ("Resume Parser",     "18001", f"{BASE}/agents/resume-parser",
-     ["python", "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "18001"]),
-    ("Classifier",        "18002", f"{BASE}/agents/classifier",
-     ["python", "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "18002"]),
-    ("Python Analyzer",   "18008", f"{BASE}/agents/analyzers/python-analyzer",
-     ["python", "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "18008"]),
+    # ("Resume Parser",     "18001", f"{BASE}/agents/resume-parser",
+    #  ["python", "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "18001"]),
+    # ("Classifier",        "18002", f"{BASE}/agents/classifier",
+    #  ["python", "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "18002"]),
+    # ("Python Analyzer",   "18008", f"{BASE}/agents/analyzers/python-analyzer",
+    #  ["python", "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "18008"]),
 ]
 
 # 如需启用全部 Analyzer Agent，取消下面注释

@@ -4,8 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
-from app.models.candidate import Candidate
-from app.schemas.candidate import (
+from app.models import Candidate
+from app.schemas import (
     CandidateCreate, CandidateUpdate, CandidateResponse, CandidateListResponse,
 )
 
@@ -103,11 +103,7 @@ async def update_candidate(
 @router.delete("/{candidate_id}")
 async def delete_candidate(candidate_id: int, db: AsyncSession = Depends(get_db)):
     """删除候选人及其所有关联记录"""
-    from app.models.resume import Resume
-    from app.models.questionnaire import Questionnaire, QuestionnaireResponse
-    from app.models.interview import Interview
-    from app.models.notification import Notification
-    from app.models.talent_pool import TalentPool
+    from app.models import Resume, Questionnaire, QuestionnaireResponse, Interview, Notification, TalentPool
 
     result = await db.execute(select(Candidate).where(Candidate.id == candidate_id))
     candidate = result.scalar_one_or_none()

@@ -1,11 +1,15 @@
-"""通知服务 — 支持邮件/短信/企业微信/钉钉多渠道统一发送"""
+"""通知服务 — 支持邮件/短信/企业微信/钉钉多渠道统一发送
+
+依赖注入：
+  __init__ 可接受 httpx_client 参数。
+  未传入时回退到临时创建（兼容旧代码）。
+"""
 from datetime import datetime
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
-from app.models.notification import Notification
+from app.models import Notification
 import httpx
-import json
 import time
 import hmac
 import hashlib
@@ -14,9 +18,8 @@ from urllib.parse import quote_plus
 
 
 class NotificationService:
-    """统一通知发送服务：封装邮件、短信、企微、钉钉四个渠道"""
+    """统一通知发送服务 — 支持依赖注入"""
 
-    # 通知模板定义（标题+正文）
     TEMPLATES = {
         "questionnaire_invite": {
             "subject": "【AI招聘助手】请完成技术评估问卷",
@@ -110,23 +113,26 @@ class NotificationService:
         },
     }
 
+    def __init__(self, httpx_client=None):
+        """构造通知服务
+
+        Args:
+            httpx_client: httpx.AsyncClient 实例（注入后复用连接池）
+        """
+        self._httpx_client = httpx_client
+
+    def _get_client(self, timeout: int = 10):
+        if self._httpx_client is not None:
+            return self._httpx_client
+        return httpx.AsyncClient(timeout=timeout)
+
     async def send(self, candidate_id: int, template: str, channel: str,
                    db: AsyncSession, extra: Optional[dict] = None,
                    recipient: Optional[str] = None):
-        """发送通知（主入口）
-
-        Args:
-            candidate_id: 目标候选人ID
-            template: 模板名称
-            channel: 发送渠道（email/sms/wework/dingtalk）
-            db: 数据库会话
-            extra: 模板变量附加数据
-            recipient: 指定收件人（不指定则从候选人信息自动获取）
-        """
-        from app.models.candidate import Candidate
+        """发送通知（主入口）"""
+        from app.models import Candidate
         from sqlalchemy import select
 
-        # 获取候选人信息
         cand_result = await db.execute(
             select(Candidate).where(Candidate.id == candidate_id)
         )
@@ -134,12 +140,10 @@ class NotificationService:
         if not candidate:
             raise ValueError(f"候选人不存在: {candidate_id}")
 
-        # 查找模板
         template_body = self.TEMPLATES.get(template)
         if not template_body:
             raise ValueError(f"不支持的模板: {template}")
 
-        # 确定收件人地址
         if not recipient:
             if channel == "email":
                 recipient = candidate.email
@@ -150,16 +154,10 @@ class NotificationService:
         if not recipient:
             raise ValueError(f"无法确定收件人地址，候选人{candidate_id}缺少联系方式")
 
-        # 渲染模板变量
-        context = {
-            "candidate_name": candidate.name,
-            "position": candidate.position,
-            **(extra or {}),
-        }
+        context = {"candidate_name": candidate.name, "position": candidate.position, **(extra or {})}
         subject = template_body["subject"]
         body = template_body["body"].format(**context)
 
-        # 创建通知记录
         notification = Notification(
             candidate_id=candidate_id,
             type=channel,
@@ -170,7 +168,6 @@ class NotificationService:
             status="pending",
         )
 
-        # 根据渠道发送
         try:
             if channel == "email":
                 await self._send_email(recipient, subject, body)
@@ -181,7 +178,6 @@ class NotificationService:
             elif channel == "dingtalk":
                 await self._send_dingtalk(subject, body)
             else:
-                # 未知渠道：仅打印日志
                 print(f"[NOTIFICATION] To: {recipient}, Subject: {subject}")
 
             notification.status = "sent"
@@ -195,14 +191,9 @@ class NotificationService:
         return notification
 
     async def _send_email(self, to: str, subject: str, body: str):
-        """发送邮件（SMTP）
-        未配置SMTP时输出模拟日志
-        """
         if not settings.SMTP_HOST:
             print(f"[EMAIL MOCK] To: {to}, Subject: {subject}")
-            print(f"[EMAIL MOCK] Body: {body[:100]}...")
             return
-
         import smtplib
         from email.mime.text import MIMEText
         from email.mime.multipart import MIMEMultipart
@@ -211,11 +202,8 @@ class NotificationService:
         msg["Subject"] = subject
         msg["From"] = settings.NOTIFICATION_EMAIL_FROM
         msg["To"] = to
-
         html_body = body.replace("\n", "<br>")
-        part = MIMEText(html_body, "html", "utf-8")
-        msg.attach(part)
-
+        msg.attach(MIMEText(html_body, "html", "utf-8"))
         with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
             if settings.SMTP_USER:
                 server.starttls()
@@ -223,38 +211,21 @@ class NotificationService:
             server.sendmail(settings.NOTIFICATION_EMAIL_FROM, [to], msg.as_string())
 
     async def _send_sms(self, to: str, body: str):
-        """发送短信（Twilio）
-        未配置时输出模拟日志
-        """
         if not settings.TWILIO_ACCOUNT_SID:
             print(f"[SMS MOCK] To: {to}, Body: {body[:100]}...")
             return
-
         from twilio.rest import Client
         client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
         await client.messages.create(
-            body=body,
-            from_=settings.TWILIO_PHONE_NUMBER,
-            to=to,
-        )
+            body=body, from_=settings.TWILIO_PHONE_NUMBER, to=to)
 
     async def _send_wework(self, subject: str, body: str):
-        """发送企业微信机器人消息（Markdown格式）
-        未配置webhook时输出模拟日志
-        """
         webhook_url = settings.WEWORK_WEBHOOK_URL
         if not webhook_url:
             print(f"[WEWORK MOCK] Subject: {subject}")
-            print(f"[WEWORK MOCK] Body: {body[:100]}...")
             return
-
         markdown_content = f"## {subject}\n\n{body}\n\n> 发送时间：{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}"
-
-        payload = {
-            "msgtype": "markdown",
-            "markdown": {"content": markdown_content},
-        }
-
+        payload = {"msgtype": "markdown", "markdown": {"content": markdown_content}}
         async with httpx.AsyncClient() as client:
             resp = await client.post(webhook_url, json=payload, timeout=10)
             resp.raise_for_status()
@@ -263,36 +234,21 @@ class NotificationService:
                 raise RuntimeError(f"企业微信发送失败: {result.get('errmsg', 'unknown')}")
 
     async def _send_dingtalk(self, subject: str, body: str):
-        """发送钉钉机器人消息（Markdown格式）
-        支持加签安全设置，未配置时输出模拟日志
-        """
         webhook_url = settings.DINGTALK_WEBHOOK_URL
         if not webhook_url:
             print(f"[DINGTALK MOCK] Subject: {subject}")
-            print(f"[DINGTALK MOCK] Body: {body[:100]}...")
             return
-
         full_text = f"## {subject}\n\n{body}\n\n> 发送时间：{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}"
-
-        payload = {
-            "msgtype": "markdown",
-            "markdown": {"title": subject, "text": full_text},
-        }
-
-        # 钉钉加签（如果配置了密钥）
+        payload = {"msgtype": "markdown", "markdown": {"title": subject, "text": full_text}}
         final_url = webhook_url
         if settings.DINGTALK_APP_SECRET:
             timestamp = str(round(time.time() * 1000))
             secret = settings.DINGTALK_APP_SECRET
             string_to_sign = f"{timestamp}\n{secret}"
-            hmac_code = hmac.new(
-                secret.encode("utf-8"),
-                string_to_sign.encode("utf-8"),
-                digestmod=hashlib.sha256,
-            ).digest()
+            hmac_code = hmac.new(secret.encode("utf-8"), string_to_sign.encode("utf-8"),
+                                 digestmod=hashlib.sha256).digest()
             sign = quote_plus(base64.b64encode(hmac_code).decode("utf-8"))
             final_url = f"{webhook_url}&timestamp={timestamp}&sign={sign}"
-
         async with httpx.AsyncClient() as client:
             resp = await client.post(final_url, json=payload, timeout=10)
             resp.raise_for_status()
@@ -301,5 +257,5 @@ class NotificationService:
                 raise RuntimeError(f"钉钉发送失败: {result.get('errmsg', 'unknown')}")
 
 
-# 全局单例
+# 全局单例 — 无参数构造，默认临时创建 httpx 客户端（兼容旧代码）
 notification_service = NotificationService()

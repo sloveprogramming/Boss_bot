@@ -28,7 +28,7 @@ async def query_candidates(
 ) -> str:                                                      # 返回 JSON 字符串
     """搜索/筛选候选人列表 — 支持多条件组合 + 分页"""
     from sqlalchemy import select, func                        # 懒加载
-    from app.models.candidate import Candidate
+    from app.models import Candidate
 
     db = await _get_db()                                       # 建独立数据库会话
     try:
@@ -87,10 +87,10 @@ async def query_candidates(
 async def get_candidate_detail(candidate_id: int) -> str:
     """获取候选人完整信息 — 简历分析 + 面试记录 + 通知历史"""
     from sqlalchemy import select
-    from app.models.candidate import Candidate
-    from app.models.resume import Resume
-    from app.models.interview import Interview
-    from app.models.notification import Notification
+    from app.models import Candidate
+    from app.models import Resume
+    from app.models import Interview
+    from app.models import Notification
 
     db = await _get_db()
     try:
@@ -179,8 +179,8 @@ async def query_interviews(                                    # 同上模式，
     """查询面试安排列表 — 按状态/日期/轮次筛选"""
     from datetime import datetime as dt
     from sqlalchemy import select, func
-    from app.models.interview import Interview
-    from app.models.candidate import Candidate
+    from app.models import Interview
+    from app.models import Candidate
 
     db = await _get_db()
     try:
@@ -225,8 +225,8 @@ async def get_dashboard_stats() -> str:
     """获取招聘仪表盘全景数据 — 总数/新增/分布/平均分/录用率/岗位分布"""
     from datetime import datetime as dt, timedelta
     from sqlalchemy import select, func
-    from app.models.candidate import Candidate
-    from app.models.interview import Interview
+    from app.models import Candidate
+    from app.models import Interview
 
     db = await _get_db()
     try:

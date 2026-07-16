@@ -1,6 +1,22 @@
-"""rag_service 配置 — 复用主项目 .env，独立运行时也可自建 .env"""
+"""rag_service 配置 — 复用项目根目录 .env，与主 Backend 共用同一份配置"""
+from pathlib import Path
 from pydantic_settings import BaseSettings
 from typing import Optional
+
+
+def _find_root_env() -> str:
+    """从当前文件位置向上查找项目根目录的 .env 文件
+
+    rag_service/config.py → ../.env  （项目根）
+    无论从哪个目录启动 rag_service 都能找到同一份配置
+    """
+    p = Path(__file__).resolve().parent
+    for _ in range(5):  # 最多向上 5 层
+        candidate = p / ".env"
+        if candidate.exists():
+            return str(candidate)
+        p = p.parent
+    return ".env"  # 兜底：使用 CWD 下的 .env
 
 
 class Settings(BaseSettings):
@@ -59,8 +75,11 @@ class Settings(BaseSettings):
     CACHE_SIMILARITY_THRESHOLD: float = 0.92
 
     class Config:
-        env_file = ".env"
+        env_file = _find_root_env()  # 从项目根目录查找 .env（与主 Backend 共用）
         env_file_encoding = "utf-8"
+        # 允许 .env / 环境变量中包含未在 Settings 中声明的旧字段，静默忽略
+        # 避免新增/保留旧环境变量时导致 RAG 服务启动失败
+        extra = "ignore"
 
 
 settings = Settings()

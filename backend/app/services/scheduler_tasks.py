@@ -1,4 +1,9 @@
-"""定时任务 — 问卷自动催填 / 面试提醒 / 人才池周期归档"""
+"""定时任务 — 问卷自动催填 / 面试提醒 / 人才池周期归档
+
+依赖注入：
+  __init__ 可接受 notification_service 参数。
+  未传入时回退到全局单例（兼容旧代码）。
+"""
 
 import asyncio
 import logging
@@ -6,21 +11,30 @@ from datetime import datetime, timedelta
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.models.candidate import Candidate
-from app.models.questionnaire import Questionnaire
-from app.models.interview import Interview, InterviewStatus
-from app.models.talent_pool import TalentPool, TalentPoolStatus
-from app.services.notification import notification_service
+from app.models import Candidate, Questionnaire, Interview, InterviewStatus, TalentPool, TalentPoolStatus
 
 logger = logging.getLogger(__name__)
 
 
 class ScheduledTasks:
-    """定时任务调度器 — 后台自动执行周期性维护任务"""
-    # 初始化定时任务调度器
-    def __init__(self, session_factory: async_sessionmaker):
-        self.session_factory = session_factory  # 数据库会话工厂
-        self._running = False                   # 运行状态标志
+    """定时任务调度器 — 支持依赖注入"""
+
+    def __init__(self, session_factory: async_sessionmaker, notification_service=None):
+        """构造定时任务调度器
+
+        Args:
+            session_factory:     数据库会话工厂（必须传入）
+            notification_service: NotificationService 实例（可选，注入后用于测试替换）
+        """
+        self.session_factory = session_factory
+        self._notification_service = notification_service
+        self._running = False
+
+    def _get_notification(self):
+        if self._notification_service is not None:
+            return self._notification_service
+        from app.services.notification import notification_service
+        return notification_service
     # 启动定时任务循环
     async def start(self, interval_seconds: int = 300):
         """启动定时任务循环（默认每5分钟检查一次）"""
@@ -77,7 +91,7 @@ class ScheduledTasks:
 
                     location_or_link = iv.location or iv.meeting_link or "待定"
 
-                    await notification_service.send(
+                    await self._get_notification().send(
                         candidate_id=iv.candidate_id,
                         template="interview_reminder",
                         channel="email",

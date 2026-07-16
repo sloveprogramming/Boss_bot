@@ -3,10 +3,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
-from app.models.interview import Interview
-from app.models.candidate import Candidate
-from app.services.scheduler_svc import scheduler
-from app.schemas.interview import (
+from app.models import Interview, Candidate
+from app.services import scheduler
+from app.schemas import (
     InterviewSlotRequest, InterviewSlotResponse,
     SlotConfirm, InterviewResponse, InterviewFeedback,
 )

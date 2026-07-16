@@ -1,49 +1,57 @@
-"""岗位分类节点
-
-调独立 Classifier Agent → 或 → 用内联关键词+LLM 分类
-"""
+"""岗位分类节点调独立 Classifier Agent → 或 → 用内联关键词+LLM 分类"""
 from ..state import RecruitmentState
 from ..agent_client import agent_client
 from app.database import async_session_factory
+from app.models import Candidate
 
 
 async def classify_node(state: RecruitmentState) -> dict:
     """判断候选人岗位类别"""
-    resume_text = state.get("resume_text", "")
-    position = state.get("position", "")
-    candidate_id = state.get("candidate_id")
+    resume_text = state.get("resume_text", "") # 候选人简历文本
+    position = state.get("position", "") # 岗位描述
+    candidate_id = state.get("candidate_id") # 候选人ID
 
-    # 尝试调用独立 Classifier Agent
+    # 调用独立 Classifier Agent（主分类器）
     agent_result = await agent_client.classify(resume_text, position)
+    # 判断是否成功获取分类结果
     if agent_result:
+        # 主分类器分类成功
         category = agent_result.get("category", "python")
+        # 主分类器置信度
         confidence = agent_result.get("confidence", 0.7)
     else:
-        # 降级：使用内联分类器（关键词匹配）
+        # 降级：使用自己设置的分类关键词分类
         category, confidence = _inline_classify(resume_text, position)
 
     # 写入数据库
     async with async_session_factory() as db:
         try:
             from sqlalchemy import select
-            from app.models.candidate import Candidate
-
+            # 从数据库查询候选人
+            # 如果候选人不存在，跳过
             result = await db.execute(
                 select(Candidate).where(Candidate.id == candidate_id)
             )
+            # 这个地方如果不清楚candidate中包含了哪些字段可以问一下ai，或者查一下数据库
             candidate = result.scalar_one_or_none()
+            # 如果候选人存在，更新分类结果
             if candidate:
+                # 更新分类结果
                 candidate.job_category = category
+                # 更新分类置信度
+                candidate.category_confidence = confidence
+                # 更新状态为已分类
                 candidate.status = "classified"
+                # 提交事务
                 await db.commit()
         except Exception as e:
             await db.rollback()
             pass  # 非关键错误，不影响流程
 
     return {
-        "job_category": category,
-        "category_confidence": confidence,
-        "status": "classified",
+        "job_category": category, # 岗位分类
+        "category_confidence": confidence, # 分类置信度
+        "status": "classified", # 状态
         "pipeline_stage": "resume",
     }
 

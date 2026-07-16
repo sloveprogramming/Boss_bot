@@ -42,7 +42,7 @@ async def send_email(
             # 使用 notification_service 的通用发送能力
             # 先获取候选人信息以渲染变量
             from sqlalchemy import select
-            from app.models.candidate import Candidate
+            from app.models import Candidate
             result = await db.execute(
                 select(Candidate).where(Candidate.id == candidate_id)
             )

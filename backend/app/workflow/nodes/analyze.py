@@ -6,8 +6,7 @@
 from ..state import RecruitmentState                                # 流程状态对象
 from ..agent_client import agent_client                            # Agent HTTP 客户端（可降级）
 from app.database import async_session_factory                     # 异步数据库会话工厂
-from app.agents.llm_client import llm_client                       # 全局 LLM 客户端
-from app.agents.prompts import RESUME_ANALYSIS_SYSTEM, RESUME_ANALYSIS_PROMPT  # 分析提示词
+from app.agents import llm_client, RESUME_ANALYSIS_SYSTEM, RESUME_ANALYSIS_PROMPT  # 全局 LLM 客户端 + 提示词
 
 
 async def analyze_node(state: RecruitmentState) -> dict:
@@ -17,22 +16,19 @@ async def analyze_node(state: RecruitmentState) -> dict:
     category = state.get("job_category", "python")                 # 上一步分类出的岗位类别
     candidate_id = state.get("candidate_id")                       # 候选人 ID
 
-    # 步骤 1：优先调用独立部署的 Analyzer Agent（HTTP）
     agent_result = await agent_client.analyze(category, resume_text, job_desc)
     if agent_result:  # Agent 可用，直接用远程结果
         match = agent_result.get("match_analysis", {})             # 匹配度详细分析
         analysis = agent_result.get("analysis", {})                # 结构化提取结果
         score = match.get("overall_score", 50)                     # 总体匹配分（默认 50）
     else:
-        # 步骤 1-降级：Agent 不可用，调用内联 LLM 分析
         analysis, match, score = await _inline_analyze(resume_text, job_desc)
 
     # 步骤 2：将分析结果写回数据库
     async with async_session_factory() as db:                      # 创建独立数据库会话
         try:
             from sqlalchemy import select
-            from app.models.candidate import Candidate
-            from app.models.resume import Resume
+            from app.models import Resume
 
             # 更新候选人记录：匹配分、类别、状态
             result = await db.execute(
@@ -44,7 +40,6 @@ async def analyze_node(state: RecruitmentState) -> dict:
                 candidate.job_category = category                   # 写入岗位类别
                 candidate.status = "analyzed"                       # 状态流转到"已分析"
 
-                # 从 LLM 分析结果中补全候选人基本信息
                 if analysis:
                     basic = analysis.get("basic_info", {})          # 姓名/电话/邮箱
                     skills = analysis.get("skills", [])             # 技能列表
@@ -57,7 +52,6 @@ async def analyze_node(state: RecruitmentState) -> dict:
                     if skills:                                      # 合并技能标签（去重，最多 10 个）
                         candidate.tags = list(set((candidate.tags or []) + skills[:10]))
 
-            # 更新最近上传的简历记录：写入分析结果
             result2 = await db.execute(
                 select(Resume)
                 .where(Resume.candidate_id == candidate_id)
@@ -76,7 +70,6 @@ async def analyze_node(state: RecruitmentState) -> dict:
         except Exception:
             await db.rollback()                                     # 出错回滚，不阻塞流程
 
-    # 步骤 3：返回状态更新（LangGraph 自动合并回 State）
     return {
         "analysis_result": analysis,                                # 结构化提取
         "match_analysis": match,                                    # 匹配度详细分析
@@ -97,7 +90,6 @@ async def _inline_analyze(resume_text: str, job_description: str) -> tuple:
         job_description=job_description or "通用岗位",
     )
 
-    # 调 LLM，要求返回 JSON（response_format 约束输出格式）
     response = await llm_client.chat(
         system=RESUME_ANALYSIS_SYSTEM,                             # 系统提示："你是资深AI招聘助手"
         messages=[{"role": "user", "content": prompt}],
@@ -106,7 +98,6 @@ async def _inline_analyze(resume_text: str, job_description: str) -> tuple:
         max_tokens=4096,
     )
 
-    # 解析 LLM 返回的 JSON（带容错）
     try:
         data = json.loads(response)                                # 正常解析
     except json.JSONDecodeError:                                   # JSON 格式不对

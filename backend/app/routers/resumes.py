@@ -2,10 +2,9 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
-from app.models.resume import Resume
-from app.models.candidate import Candidate
-from app.services.resume_analyzer import resume_analyzer
-from app.schemas.resume import ResumeUploadResponse, ResumeAnalysisResponse
+from app.models import Resume, Candidate
+from app.services import resume_analyzer
+from app.schemas import ResumeUploadResponse, ResumeAnalysisResponse
 
 router = APIRouter(prefix="/api/resumes", tags=["简历管理"])
 
@@ -120,7 +119,7 @@ async def get_candidate_resume_analysis(
 # ====================================================================
 
 from fastapi.responses import StreamingResponse
-from app.utils.sse import token_event, progress_event, done_event, error_event
+from app.utils import token_event, progress_event, done_event, error_event
 
 
 @router.post("/{resume_id}/analyze/stream")
@@ -149,8 +148,7 @@ async def analyze_resume_stream(
         raise HTTPException(status_code=404, detail="简历不存在")
 
     async def generate():
-        from app.agents.prompts import RESUME_ANALYSIS_SYSTEM, RESUME_ANALYSIS_PROMPT
-        from app.agents.llm_client import llm_client
+        from app.agents import llm_client, RESUME_ANALYSIS_SYSTEM, RESUME_ANALYSIS_PROMPT
 
         yield progress_event("init", "running", "准备分析简历...", 5)
 

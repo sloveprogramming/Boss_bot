@@ -23,7 +23,7 @@ from .nodes.schedule import (
 )
 from .nodes.decision import make_decision_node
 from .nodes.talent_pool import move_to_talent_pool_node
-from .nodes.function_calling import function_calling_node
+# from .nodes.function_calling import function_calling_node  # 节点已从图中移除，通过 router 直接调用
 from app.config import settings
 
 
@@ -85,7 +85,7 @@ def build_recruitment_graph() -> StateGraph:
     workflow.add_node("parse_resume", parse_resume_node)
     workflow.add_node("classify", classify_node)
     workflow.add_node("analyze", analyze_node)
-    workflow.add_node("function_calling", function_calling_node)  # NEW: Function Calling
+    # workflow.add_node("function_calling", function_calling_node)  # 节点已从图中移除，通过 router 直接调用
     workflow.add_node("generate_questionnaire", generate_questionnaire_node)
     workflow.add_node("wait_questionnaire", wait_questionnaire_node)
     workflow.add_node("score_questionnaire", score_questionnaire_node)

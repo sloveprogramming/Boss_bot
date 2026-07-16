@@ -68,75 +68,10 @@ RESUME_ANALYSIS_PROMPT = """请分析以下简历文本，提取结构化信息�
 - recommended_questions要针对岗位和简历内容定制"""
 
 # ========== 面试排期相关 ==========
-
-SCHEDULER_SYSTEM = """你是一位面试排期协调专家，负责根据面试官和候选人的可用时间，推荐合理的面试时间段。"""
-
-SCHEDULER_PROMPT = """请根据以下信息推荐面试时间：
-
-候选人：{candidate_name}
-面试岗位：{position}
-面试时长：{duration} 分钟
-面试轮次：{round}
-
-面试官可用时间：
-{interviewer_availability}
-
-可预约日期范围：{date_start} 至 {date_end}
-工作日工作时间：{work_start} - {work_end}
-排除日期：{exclude_dates}
-
-请推荐 {slot_count} 个可选时间段，优先安排较早可用的时间。
-每天最多安排 {max_per_day} 场面试。
-
-输出JSON格式：
-```json
-{{
-    "proposed_slots": [
-        {{"date": "2025-01-15", "start_time": "10:00", "end_time": "11:00"}}
-    ]
-}}
-```"""
+# (以下 SCHEDULER_* 常量已废弃 — 排期功能改用算法引擎实现，LLM 仅做对话场景辅助)
 
 # ========== 规章制度RAG Agent相关 ==========
-
-POLICY_AGENT_SYSTEM = """你是一位专业的企业政策顾问，负责解答员工关于公司规章制度的各类问题。
-
-规则：
-1. 仅基于提供的参考文档内容回答
-2. 如果参考文档中没有相关信息，明确告知"目前已有的规章制度文档中没有覆盖这个问题"
-3. 引用具体来源（文档名称和章节）
-4. 如果问题涉及多个相关政策，综合回答
-5. 回答要清晰、准确、友善
-6. 对于不确定的内容，不要编造，承认不确定
-
-回答格式：
-- 先给出直接答案
-- 如有必要，补充解释
-- 最后列出引用来源"""
-
-POLICY_AGENT_PROMPT = """参考文档内容：
-{retrieved_chunks}
-
-用户问题：{user_question}
-
-请基于参考文档回答用户的问题。如果参考文档无法回答，请明确告知。"""
+# (以下 POLICY_AGENT_* 常量已迁移至 rag_service/app/agents/prompts.py — RAG 服务已独立拆分)
 
 # ========== 面试反馈分析相关 ==========
-
-INTERVIEW_FEEDBACK_SYSTEM = """你是一位面试分析专家，负责总结面试反馈并生成结构化报告。"""
-
-INTERVIEW_FEEDBACK_PROMPT = """请根据以下面试反馈生成面试摘要：
-
-候选人：{candidate_name}
-岗位：{position}
-面试官反馈：{feedback}
-
-请输出JSON：
-```json
-{{
-    "ai_summary": "面试摘要（200字以内，包含技术能力、沟通能力、总体评价）",
-    "key_observations": ["关键观察1", "观察2", "观察3"],
-    "recommendation": "pass/reject/pending",
-    "next_steps": "下一步建议"
-}}
-```"""
+# (以下 INTERVIEW_FEEDBACK_* 常量已废弃 — 功能未实现，预留位置)

@@ -11,13 +11,13 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
-from app.mcp.tools.database import (
+from app.mcp.tools import (
     query_candidates,
     get_candidate_detail,
     query_interviews,
     get_dashboard_stats,
+    send_email,
 )
-from app.mcp.tools.email import send_email
 
 # ===== MCP Server 实例 =====
 server = Server("boos-bot-recruitment")

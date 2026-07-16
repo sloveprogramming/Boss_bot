@@ -4,7 +4,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timedelta
 from app.database import get_db
-from app.models.candidate import Candidate
+from app.models import Candidate
 
 router = APIRouter(prefix="/api/dashboard", tags=["仪表盘"])
 

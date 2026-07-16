@@ -7,7 +7,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models.exam_analysis import ExamAnalysis
+from app.models import ExamAnalysis
 
 logger = logging.getLogger(__name__)
 

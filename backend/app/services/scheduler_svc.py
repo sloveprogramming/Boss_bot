@@ -1,16 +1,41 @@
-"""面试排期引擎 — 基于约束求解的时间段生成 + 钉钉日历集成"""
+"""面试排期引擎 — 基于约束求解的时间段生成 + 钉钉日历集成
+
+依赖注入：
+  __init__ 可接受 calendar_service 和 notification_service 参数。
+  未传入时回退到全局单例（兼容旧代码）。
+"""
 from datetime import datetime, timedelta
 from typing import List, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.candidate import Candidate
-from app.models.interview import Interview, InterviewStatus
-from app.services.calendar_svc import calendar_service
+from app.models import Candidate, Interview, InterviewStatus
 from app.config import settings
 from datetime import date, time, datetime
 
 class InterviewScheduler:
-    """面试排期引擎：生成可选时间段、确认时间、提交反馈"""
+    """面试排期引擎 — 支持依赖注入"""
+
+    def __init__(self, calendar_service=None, notification_service=None):
+        """构造排期引擎
+
+        Args:
+            calendar_service:     CalendarService 实例（注入后用于日历集成）
+            notification_service: NotificationService 实例（注入后用于发送通知）
+        """
+        self._calendar_service = calendar_service
+        self._notification_service = notification_service
+
+    def _get_calendar(self):
+        if self._calendar_service is not None:
+            return self._calendar_service
+        from app.services.calendar_svc import calendar_service
+        return calendar_service
+
+    def _get_notification(self):
+        if self._notification_service is not None:
+            return self._notification_service
+        from app.services.notification import notification_service
+        return notification_service
 
     async def generate_slots(
         self,
@@ -198,11 +223,12 @@ class InterviewScheduler:
 
         # 异步创建钉钉日历日程（不阻塞主流程）
         try:
-            calendar_service.configure(
+            cal = self._get_calendar()
+            cal.configure(
                 settings.DINGTALK_APP_KEY,
                 settings.DINGTALK_APP_SECRET,
             )
-            await calendar_service.create_interview_event(
+            await cal.create_interview_event(
                 candidate_name=candidate.name if candidate else "候选人",
                 position=candidate.position if candidate else "",
                 interview_time=start_dt,

@@ -1,11 +1,32 @@
 /** API 客户端 */
 const BASE = '/api'
 
+/** 从 localStorage 读取 JWT Token */
+function getToken(): string | null {
+  try {
+    const data = JSON.parse(localStorage.getItem('boos_bot_auth') || '{}')
+    return data?.token || null
+  } catch {
+    return null
+  }
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-    ...options,
-  })
+  const token = getToken()
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(options?.headers as Record<string, string>),
+  }
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+  const res = await fetch(`${BASE}${path}`, { ...options, headers })
+  if (res.status === 401) {
+    // token 过期或无效，清除本地认证状态
+    localStorage.removeItem('boos_bot_auth')
+    window.location.href = '/login'
+    throw new Error('登录已过期，请重新登录')
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }))
     throw new Error(err.detail || `HTTP ${res.status}`)

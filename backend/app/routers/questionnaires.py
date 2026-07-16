@@ -8,9 +8,9 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
-from app.models.questionnaire import Questionnaire
-from app.services.questionnaire_svc import questionnaire_service, QUESTIONNAIRE_LINK
-from app.schemas.questionnaire import QuestionnaireResponse as QResponse
+from app.models import Questionnaire
+from app.services import questionnaire_service, QUESTIONNAIRE_LINK
+from app.schemas import QuestionnaireResponse as QResponse
 
 router = APIRouter(prefix="/api/questionnaires", tags=["问卷管理"])
 

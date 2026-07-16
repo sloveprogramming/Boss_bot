@@ -5,8 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 
 from app.database import get_db
-from app.models.policy import PolicyDocument
-from app.services.policy_rag import policy_rag_agent
+from app.models import PolicyDocument
+from app.services import policy_rag_agent
 
 router = APIRouter(prefix="/api/documents", tags=["文档管理"])
 

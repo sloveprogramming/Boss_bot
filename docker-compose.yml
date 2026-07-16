@@ -2,25 +2,26 @@
 # 旧微服务 Agent（orchestrator, resume-parser, classifier, analyzers）已废弃
 # 招聘流程引擎已内嵌至 Backend (LangGraph)
 # 端口: backend=18000, rag-service=18003, frontend=18016
+# 所有 Dockerfile 已统一到项目根目录（Dockerfile.backend / Dockerfile.rag）
+# 所有 requirements.txt 已统一到根目录
+# 所有 .env 已统一到根目录
 
 services:
   # ==================== 主后端（招聘流程引擎） ====================
   backend:
-    build: ./backend
+    build:
+      context: .                        # 构建上下文为项目根目录
+      dockerfile: Dockerfile.backend    # 引用根目录的 Dockerfile
     ports:
       - "18000:18000"
-    environment: &llm_env
-      - LLM_PROVIDER=${LLM_PROVIDER:-openai}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.deepseek.com}
-      - OPENAI_MODEL=${OPENAI_MODEL:-deepseek-v4-flash}
+    env_file:
+      - .env                            # 从根目录 .env 加载所有环境变量
+    environment:
+      # 容器内服务发现：Milvus 走容器网络名
       - MILVUS_HOST=milvus-standalone
       - MILVUS_PORT=19530
-      - DATABASE_URL=${DATABASE_URL:-sqlite+aiosqlite:///./data/recruit.db}
-      - SMTP_HOST=${SMTP_HOST:-}
-      - SMTP_PORT=${SMTP_PORT:-587}
-      - SMTP_USER=${SMTP_USER:-}
-      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      # 数据持久化到 volume
+      - DATABASE_URL=sqlite+aiosqlite:///./data/recruit.db
     volumes:
       - sqlite_data:/app/data
       - backend_uploads:/app/uploads
@@ -31,14 +32,18 @@ services:
 
   # ==================== RAG 服务（企业制度智能问答） ====================
   rag-service:
-    build: ./rag_service
+    build:
+      context: .                        # 构建上下文为项目根目录
+      dockerfile: Dockerfile.rag        # 引用根目录的 Dockerfile
     ports:
       - "18003:18003"
+    env_file:
+      - .env                            # 从根目录 .env 加载所有环境变量
     environment:
-      <<: *llm_env
+      # 容器内服务发现：Milvus 走容器网络名
       - MILVUS_HOST=milvus-standalone
       - MILVUS_PORT=19530
-      - DATABASE_URL=${DATABASE_URL:-sqlite+aiosqlite:///./data/recruit.db}
+      - DATABASE_URL=sqlite+aiosqlite:///./data/recruit.db
     volumes:
       - sqlite_data:/app/data
     depends_on:
@@ -47,13 +52,17 @@ services:
     restart: unless-stopped
 
   # ==================== 前端 ====================
-  frontend:
-    build: ./frontend
-    ports:
-      - "18016:18016"
-    depends_on:
-      - backend
-    restart: unless-stopped
+  # 前端 Dockerfile 待添加（建议 nginx + 静态文件，参考 Dockerfile.frontend）
+  # 当前如需启用，请先在 frontend/ 目录下创建 Dockerfile 并取消下面注释
+  # frontend:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.frontend
+  #   ports:
+  #     - "18016:18016"
+  #   depends_on:
+  #     - backend
+  #   restart: unless-stopped
 
   # ==================== 向量数据库 (Milvus + MinIO) ====================
   minio:

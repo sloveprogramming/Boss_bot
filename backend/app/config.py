@@ -1,10 +1,27 @@
-"""应用配置 — 使用Pydantic Settings从环境变量和.env文件加载"""
+"""应用配置 — 使用Pydantic Settings从项目根目录的.env文件加载"""
+import os
+from pathlib import Path
 from pydantic_settings import BaseSettings
 from typing import Optional
 
 
+def _find_root_env() -> str:
+    """从当前文件位置向上查找项目根目录的 .env 文件
+
+    backend/app/config.py → ../../.env  （项目根）
+    无论从哪个目录启动 uvicorn 都能找到同一份配置
+    """
+    p = Path(__file__).resolve().parent
+    for _ in range(5):  # 最多向上 5 层
+        candidate = p / ".env"
+        if candidate.exists():
+            return str(candidate)
+        p = p.parent
+    return ".env"  # 兜底：使用 CWD 下的 .env
+
+
 class Settings(BaseSettings):
-    """应用配置类，自动从.env文件和环境变量读取"""
+    """应用配置类，自动从项目根目录的 .env 读取"""
     # 应用基本信息
     APP_NAME: str = "AI Recruit Assistant"  # 应用名称
     DEBUG: bool = True                       # 调试模式
@@ -107,8 +124,11 @@ class Settings(BaseSettings):
     MAX_INTERVIEWS_PER_DAY: int = 5              # 每天最大面试数
 
     class Config:
-        env_file = ".env"              # 从.env文件读取
+        env_file = _find_root_env()  # 从项目根目录查找 .env（不再依赖 CWD）
         env_file_encoding = "utf-8"    # 文件编码
+        # 允许 .env / 环境变量中包含未在 Settings 中声明的旧字段（如已弃用的 Agent URL），静默忽略
+        # 避免新增/保留旧环境变量时导致整个应用启动失败
+        extra = "ignore"
 
 
 # 全局设置实例

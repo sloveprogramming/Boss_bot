@@ -5,9 +5,9 @@ Parent-Child Chunking:
   - 子块(Child):  300字符, 作为检索匹配的最小单位（提高命中精度）
   - 检索时命中子块 → 按 parent_id 去重 → 返回父块内容 → CrossEncoder 重排序
 
-中文递归分句器（从 EduRAG 迁移）:
-  - 分隔符优先级: 段落 > 换行 > 中文句尾 > 英文句尾 > 分号 > 逗号
-  - 保留分隔符在chunk末尾，保持语义完整性
+依赖注入：
+  __init__ 可接受 parent_splitter 和 child_splitter 参数。
+  未传入时自动创建默认 ChineseRecursiveTextSplitter（兼容旧代码）。
 """
 import re
 import logging
@@ -35,7 +35,7 @@ def _split_text_with_regex(text: str, separator: str, keep_separator: bool) -> L
 
 
 class ChineseRecursiveTextSplitter(RecursiveCharacterTextSplitter):
-    """中文递归分句器"""
+    """中文递归分句器 — 所有参数可通过构造器传入"""
 
     def __init__(
         self,
@@ -46,17 +46,15 @@ class ChineseRecursiveTextSplitter(RecursiveCharacterTextSplitter):
     ) -> None:
         super().__init__(keep_separator=keep_separator, **kwargs)
         self._separators = separators or [
-            "\n\n",             # 段落分隔
-            "\n",               # 换行
-            "。|！|？",         # 中文句子结尾
-            r"\.\s|\!\s|\?\s",  # 英文句子结尾（后跟空格）
-            "；|;\s",           # 分号
-            "，|,\s"            # 逗号
+            "\n\n", "\n",
+            "。|！|？",
+            r"\.\s|\!\s|\?\s",
+            "；|;\s",
+            "，|,\s",
         ]
         self._is_separator_regex = is_separator_regex
 
     def _split_text(self, text: str, separators: List[str]) -> List[str]:
-        """递归拆分核心逻辑"""
         final_chunks = []
         separator = separators[-1]
         new_separators = []
@@ -100,45 +98,49 @@ class ChineseRecursiveTextSplitter(RecursiveCharacterTextSplitter):
 
 
 class PolicyParentChildSplitter:
-    """Parent-Child 双层分块器
+    """Parent-Child 双层分块器 — 支持依赖注入
 
     子块(300字)用于检索匹配，父块(1200字)作为LLM上下文。
     检索命中子块 → parent_id 去重 → 返回父块内容。
     """
 
-    def __init__(self, parent_chunk_size: int = 1200, child_chunk_size: int = 300,
-                 chunk_overlap: int = 50):
+    def __init__(self,
+                 parent_chunk_size: int = 1200,
+                 child_chunk_size: int = 300,
+                 chunk_overlap: int = 50,
+                 parent_splitter=None,
+                 child_splitter=None):
+        """构造分块器
+
+        Args:
+            parent_chunk_size: 父块大小（字符数）
+            child_chunk_size:  子块大小（字符数）
+            chunk_overlap:     重叠字符数
+            parent_splitter:   父块拆分器实例（注入后跳过内部创建）
+            child_splitter:    子块拆分器实例（注入后跳过内部创建）
+        """
         self.parent_chunk_size = parent_chunk_size
         self.child_chunk_size = child_chunk_size
         self.chunk_overlap = chunk_overlap
 
-        # 父块用较大的拆分器
-        self._parent_splitter = ChineseRecursiveTextSplitter(
-            keep_separator=True,
-            is_separator_regex=True,
-            chunk_size=parent_chunk_size,
-            chunk_overlap=chunk_overlap,
+        self._parent_splitter = parent_splitter or ChineseRecursiveTextSplitter(
+            keep_separator=True, is_separator_regex=True,
+            chunk_size=parent_chunk_size, chunk_overlap=chunk_overlap,
         )
-        # 子块用较小的拆分器
-        self._child_splitter = ChineseRecursiveTextSplitter(
-            keep_separator=True,
-            is_separator_regex=True,
-            chunk_size=child_chunk_size,
-            chunk_overlap=chunk_overlap,
+        self._child_splitter = child_splitter or ChineseRecursiveTextSplitter(
+            keep_separator=True, is_separator_regex=True,
+            chunk_size=child_chunk_size, chunk_overlap=chunk_overlap,
         )
 
     def split_documents(self, documents: List[Document]) -> List[Document]:
         """将文档列表先拆父块，再拆子块，子块带 parent_id"""
         all_child_docs = []
-
         for doc in documents:
             parent_text = doc.page_content
             parent_chunks = self._parent_splitter.split_text(parent_text)
-
             for p_idx, parent_chunk in enumerate(parent_chunks):
                 parent_id = f"{doc.metadata.get('doc_id', '')}_{hashlib.md5(parent_chunk.encode()).hexdigest()[:8]}"
                 child_chunks = self._child_splitter.split_text(parent_chunk)
-
                 for c_idx, child_chunk in enumerate(child_chunks):
                     child_doc = Document(
                         page_content=child_chunk,
@@ -151,6 +153,5 @@ class PolicyParentChildSplitter:
                         },
                     )
                     all_child_docs.append(child_doc)
-
         logger.info(f"Parent-Child 分块: {len(parent_chunks)} 父块 → {len(all_child_docs)} 子块")
         return all_child_docs

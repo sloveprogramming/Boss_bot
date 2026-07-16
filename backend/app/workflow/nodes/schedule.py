@@ -6,8 +6,7 @@
 """
 from ..state import RecruitmentState
 from app.database import async_session_factory
-from app.services.scheduler_svc import scheduler
-from app.services.notification import notification_service
+from app.services import scheduler, notification_service
 from datetime import date, timedelta
 
 

@@ -30,7 +30,7 @@ async def lifespan(app: FastAPI):
     print(f"  [{settings.APP_NAME}] LLM提供商: {settings.LLM_PROVIDER}")
 
     # 启动后台定时任务（每5分钟检查一次）
-    from app.services.scheduler_tasks import ScheduledTasks
+    from app.services import ScheduledTasks
     # 启动定时任务（每5分钟检查一次）
     task_runner = ScheduledTasks(async_session_factory)
     # 启动定时任务（每5分钟检查一次）

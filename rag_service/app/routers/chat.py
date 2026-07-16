@@ -7,8 +7,8 @@ from pydantic import BaseModel
 from typing import Optional
 
 from app.database import get_db
-from app.services.policy_rag import policy_rag_agent
-from app.agents.llm_client import llm_client
+from app.services import policy_rag_agent
+from app.agents import llm_client
 
 router = APIRouter(prefix="/api/chat", tags=["制度问答"])
 
@@ -91,7 +91,7 @@ async def chat_stream(data: ChatRequest, db: AsyncSession = Depends(get_db)):
                 "message": "正在生成回答...", "progress_pct": 50,
             })
 
-            from app.agents.prompts import POLICY_AGENT_SYSTEM, POLICY_AGENT_PROMPT
+            from app.agents import POLICY_AGENT_SYSTEM, POLICY_AGENT_PROMPT
             chat_prompt = POLICY_AGENT_PROMPT.format(
                 retrieved_chunks=retrieved_text,
                 user_question=data.message,

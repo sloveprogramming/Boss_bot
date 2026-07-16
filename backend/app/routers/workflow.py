@@ -7,16 +7,14 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 from app.database import get_db
-from app.models.candidate import Candidate
-from app.models.talent_pool import TalentPool, TalentPoolStatus
-from app.workflow.state import RecruitmentState
-from app.workflow.graph import recruitment_graph
-from app.schemas.candidate import (
+from app.models import Candidate, TalentPool, TalentPoolStatus
+from app.workflow import RecruitmentState, recruitment_graph
+from app.schemas import (
     TalentPoolResponse, TalentPoolListResponse,
     ReactivateRequest, TalentPoolCreateRequest,
+    WorkflowStatusResponse,
 )
-from app.services.notification import notification_service
-from app.schemas.notification import WorkflowStatusResponse
+from app.services import notification_service
 
 router = APIRouter(prefix="/api/workflow", tags=["招聘流程"])
 
@@ -402,7 +400,7 @@ class FunctionCallResponse(BaseModel):
 @router.get("/mcp/tools")
 async def list_mcp_tools():
     """列出所有可用的 MCP Tools（供 LLM Function Calling 使用）"""
-    from app.mcp.client import get_tool_definitions_openai
+    from app.mcp import get_tool_definitions_openai
     return {
         "tools": get_tool_definitions_openai(),
         "total": len(get_tool_definitions_openai()),
@@ -426,7 +424,7 @@ async def function_call_endpoint(data: FunctionCallRequest):
     - "发送面试邀请邮件给候选人 5"
     - "查询明天的面试安排"
     """
-    from app.workflow.nodes.function_calling import run_function_calling
+    from app.workflow.nodes import run_function_calling
     result = await run_function_calling(
         query=data.query,
         system_prompt=data.system_prompt,
@@ -470,7 +468,7 @@ async def function_call_in_graph(
         "messages": [],
     }
 
-    from app.workflow.nodes.function_calling import function_calling_node
+    from app.workflow.nodes import function_calling_node
     result_state = await function_calling_node(initial_state)
 
     return {
@@ -487,7 +485,7 @@ async def function_call_in_graph(
 # ====================================================================
 
 from fastapi.responses import StreamingResponse
-from app.utils.sse import (
+from app.utils import (
     token_event, progress_event, done_event, error_event, sse_event,
 )
 
@@ -506,7 +504,7 @@ async def function_call_stream(data: FunctionCallRequest):
     7. done: 完成
     """
     import json
-    from app.mcp.client import get_tool_definitions_openai, execute_tool_directly
+    from app.mcp import get_tool_definitions_openai, execute_tool_directly
     from app.config import settings
     from openai import AsyncOpenAI
 

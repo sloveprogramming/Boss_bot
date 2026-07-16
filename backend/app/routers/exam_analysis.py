@@ -8,9 +8,9 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models.exam_analysis import ExamAnalysis
-from app.schemas.exam_analysis import ExamAnalysisResponse, ExamAnalysisListResponse
-from app.services.exam_analysis_svc import exam_analysis_service
+from app.models import ExamAnalysis
+from app.schemas import ExamAnalysisResponse, ExamAnalysisListResponse
+from app.services import exam_analysis_service
 
 logger = logging.getLogger(__name__)
 

@@ -6,14 +6,14 @@
 """
 import json
 from typing import Any
-from app.mcp.tools.database import (
+from app.mcp.tools import (
     query_candidates,
     get_candidate_detail,
     query_interviews,
     get_dashboard_stats,
+    send_email,
 )
-from app.mcp.tools.email import send_email
-
+from app.mcp import TOOL_DEFINITIONS
 
 # 工具函数直连映射（无 MCP 协议开销）
 DIRECT_TOOLS = {
@@ -25,10 +25,6 @@ DIRECT_TOOLS = {
 }
 
 # 工具定义（OpenAI Function Calling 格式）
-# 从 server.py 复用
-from app.mcp.server import TOOL_DEFINITIONS
-
-
 def get_tool_definitions_openai() -> list[dict[str, Any]]:
     """获取 OpenAI Function Calling 格式的工具定义"""
     return [
