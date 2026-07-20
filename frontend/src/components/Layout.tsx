@@ -2,7 +2,7 @@
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Users, FileText, Calendar, Bot, GitBranch, ClipboardList,
-  Menu, X, Sparkles, LogOut, User as UserIcon, Shield, ChevronDown,
+  Menu, X, Sparkles, LogOut, User as UserIcon, Shield, ChevronDown, CloudLightning,
 } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import { useAuth } from '../contexts/AuthContext'
@@ -25,7 +25,6 @@ export default function Layout() {
   const { user, logout } = useAuth()
   const menuRef = useRef<HTMLDivElement>(null)
 
-  // 点击外部关闭用户菜单
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
@@ -67,18 +66,18 @@ export default function Layout() {
         lg:relative lg:translate-x-0
         ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
       `}>
-        {/* Logo */}
+        {/* Logo — 智聘云 */}
         <div className="flex items-center justify-between h-16 px-5 border-b border-indigo-100/60">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
-              <Sparkles className="w-4 h-4 text-white" />
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/25">
+              <CloudLightning className="w-4 h-4 text-white" />
             </div>
             <div>
-              <h1 className="text-sm font-bold">
-                <span className="gradient-text">AI</span>
-                <span className="text-gray-700"> 招聘助手</span>
+              <h1 className="text-base font-bold tracking-tight">
+                <span className="gradient-text">智聘</span>
+                <span className="text-gray-700">云</span>
               </h1>
-              <p className="text-[10px] text-gray-400 leading-none">智能招聘自动化</p>
+              <p className="text-[10px] text-gray-400 leading-none">AI 智能招聘平台</p>
             </div>
           </div>
           <button onClick={() => setSidebarOpen(false)} className="lg:hidden p-1 rounded-lg hover:bg-gray-100">
@@ -122,7 +121,7 @@ export default function Layout() {
           ))}
         </nav>
 
-        {/* 底部用户信息 */}
+        {/* 底部用户 */}
         <div className="p-4 border-t border-indigo-100/60">
           {user ? (
             <div className="flex items-center gap-3 px-2 py-2 rounded-xl bg-gradient-to-r from-indigo-50 to-purple-50">
@@ -164,9 +163,7 @@ export default function Layout() {
           <button onClick={() => setSidebarOpen(true)} className="p-2 rounded-lg hover:bg-gray-100">
             <Menu className="w-5 h-5 text-gray-600" />
           </button>
-          <span className="text-sm font-medium text-gray-600">
-            {navItems.find(i => location.pathname === i.path || (i.path !== '/' && location.pathname.startsWith(i.path)))?.label || 'AI 招聘助手'}
-          </span>
+          <span className="text-sm font-medium gradient-text">智聘云</span>
           {user ? (
             <button onClick={handleLogout} className="p-2 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500">
               <LogOut className="w-4 h-4" />
@@ -191,7 +188,6 @@ export default function Layout() {
               <span className="text-xs text-gray-400">系统运行中</span>
             </div>
 
-            {/* 用户菜单 */}
             {user && (
               <div ref={menuRef} className="relative">
                 <button
@@ -208,7 +204,6 @@ export default function Layout() {
                   <ChevronDown className={`w-3.5 h-3.5 text-gray-400 transition-transform ${userMenuOpen ? 'rotate-180' : ''}`} />
                 </button>
 
-                {/* 下拉菜单 */}
                 {userMenuOpen && (
                   <div className="absolute right-0 top-full mt-1 w-48 bg-white rounded-xl shadow-xl border border-gray-100 py-1 z-50">
                     <div className="px-3 py-2 border-b border-gray-50">
@@ -232,7 +227,7 @@ export default function Layout() {
         </header>
 
         {/* 页面内容 */}
-        <main className="flex-1 overflow-auto p-6 lg:p-8">
+        <main className="flex-1 overflow-auto p-6 lg:p-8 page-enter">
           <Outlet />
         </main>
       </div>

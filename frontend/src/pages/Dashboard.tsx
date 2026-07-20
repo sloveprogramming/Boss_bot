@@ -64,19 +64,20 @@ export default function Dashboard() {
   return (
     <div className="space-y-8">
       {/* 欢迎横幅 */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-500 p-8 text-white">
-        <div className="absolute inset-0 bg-white/10 backdrop-blur-3xl" />
-        <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/4" />
-        <div className="absolute bottom-0 left-0 w-48 h-48 bg-white/5 rounded-full translate-y-1/2 -translate-x-1/4" />
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-500 p-8 text-white hero-bg">
+        <div className="absolute inset-0 overflow-hidden">
+          <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/4 float" />
+          <div className="absolute bottom-0 left-0 w-48 h-48 bg-white/5 rounded-full translate-y-1/2 -translate-x-1/4" style={{ animationDelay: '2s' }} />
+        </div>
         <div className="relative z-10 flex items-center justify-between">
           <div>
             <div className="flex items-center gap-2 mb-2">
               <Sparkles className="w-5 h-5 text-amber-300" />
-              <span className="text-sm font-medium text-white/80">AI 驱动的智能招聘系统</span>
+              <span className="text-sm font-medium text-white/80">AI 驱动的智能招聘平台</span>
             </div>
-            <h2 className="text-2xl font-bold mb-1">欢迎使用 AI 招聘助手</h2>
+            <h2 className="text-2xl font-bold mb-1">欢迎使用 智聘云</h2>
             <p className="text-white/70 text-sm max-w-lg">
-              无需手动筛选，AI 自动完成简历解析、匹配度评分、面试排期 — 让招聘效率提升 10 倍
+              简历解析 · 智能评分 · 自动分流 · 面试排期 — 一站式招聘自动化，效率提升 10 倍
             </p>
           </div>
           <div className="hidden lg:block">

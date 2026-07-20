@@ -23,7 +23,7 @@ def _find_root_env() -> str:
 class Settings(BaseSettings):
     """应用配置类，自动从项目根目录的 .env 读取"""
     # 应用基本信息
-    APP_NAME: str = "AI Recruit Assistant"  # 应用名称
+    APP_NAME: str = "智聘云"  # 应用名称
     DEBUG: bool = True                       # 调试模式
 
     # 数据库配置
