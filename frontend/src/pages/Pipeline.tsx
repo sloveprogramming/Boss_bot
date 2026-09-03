@@ -1,178 +1,162 @@
-import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Play, ArrowRight, RefreshCw, Zap } from 'lucide-react'
-import { workflowApi, candidatesApi } from '../lib/api'
+import { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { RefreshCw, Phone } from "lucide-react";
+import { api, errDetail } from "../lib/api";
+import { Badge, Button, Card, EmptyState, Field, Input, Modal, PageHeader, Spinner, useToast } from "../components/ui";
+import { statusMeta, type PipelineOverview, type TalentPoolItem } from "../types";
 
-const stageConfig = [
-  { key: 'new', label: '新候选人', color: 'from-blue-500 to-cyan-400', dot: 'bg-blue-500' },
-  { key: 'analyzed', label: '已分析', color: 'from-purple-500 to-pink-400', dot: 'bg-purple-500' },
-  { key: 'talent_pool', label: '人才池', color: 'from-amber-500 to-orange-400', dot: 'bg-amber-500' },
-  { key: 'q_sent', label: '问卷已发', color: 'from-yellow-500 to-amber-400', dot: 'bg-yellow-500' },
-  { key: 'q_done', label: '问卷完成', color: 'from-indigo-500 to-blue-400', dot: 'bg-indigo-500' },
-  { key: 'scheduled', label: '已排期', color: 'from-teal-500 to-emerald-400', dot: 'bg-teal-500' },
-  { key: 'interviewed', label: '已面试', color: 'from-cyan-500 to-sky-400', dot: 'bg-cyan-500' },
-  { key: 'hired', label: '已录用', color: 'from-emerald-500 to-green-400', dot: 'bg-emerald-500' },
-]
+const STAGE_KEYS = ["新候选人", "简历已分析", "人才池", "问卷已发送", "问卷已完成", "面试已排期", "已面试", "已录用", "已拒绝"];
+const STAGE_COLORS = [
+  "bg-slate-400", "bg-blue-500", "bg-amber-500", "bg-purple-500", "bg-violet-500",
+  "bg-cyan-500", "bg-indigo-500", "bg-emerald-500", "bg-rose-500",
+];
 
 export default function Pipeline() {
-  const [pipeline, setPipeline] = useState<any>(null)
-  const [candidates, setCandidates] = useState<any[]>([])
-  const [processing, setProcessing] = useState<number | null>(null)
-  const navigate = useNavigate()
+  const nav = useNavigate();
+  const { toast } = useToast();
+  const [data, setData] = useState<PipelineOverview | null>(null);
+  const [pool, setPool] = useState<TalentPoolItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [reactivateTarget, setReactivateTarget] = useState<TalentPoolItem | null>(null);
+  const [newPosition, setNewPosition] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  useEffect(() => { loadData() }, [])
-
-  const loadData = async () => {
-    const [p, c] = await Promise.all([
-      workflowApi.pipeline(),
-      candidatesApi.list({ page_size: 100 }).then(d => d.items),
-    ])
-    setPipeline(p)
-    setCandidates(c)
-  }
-
-  const handleAutoProcess = async (candidateId: number) => {
-    setProcessing(candidateId)
+  const load = useCallback(async () => {
+    setLoading(true);
     try {
-      const result = await workflowApi.autoProcess(candidateId)
-      alert(`${result.action}: ${result.message}`)
-      loadData()
-    } catch (e: any) {
-      alert('自动处理失败: ' + e.message)
-    } finally {
-      setProcessing(null)
-    }
-  }
+      const [p, tp] = await Promise.all([
+        api.workflow.pipeline(),
+        api.workflow.talentPool({ page: 1, page_size: 50 }),
+      ]);
+      setData(p.data);
+      setPool(tp.data.items);
+    } catch (e) { toast(errDetail(e), "err"); }
+    finally { setLoading(false); }
+  }, []); // eslint-disable-line
 
-  const grouped = candidates.reduce((acc: any, c: any) => {
-    const found = stageConfig.find(s => s.key === c.status)
-    const stage = found ? c.status : 'other'
-    if (!acc[stage]) acc[stage] = []
-    acc[stage].push(c)
-    return acc
-  }, {} as Record<string, any[]>)
+  useEffect(() => { load(); }, [load]);
+
+  if (loading) return <Spinner />;
+  if (!data) return <EmptyState text="加载失败" />;
+
+  const maxStage = Math.max(1, ...Object.values(data.stages));
+
+  const doReactivate = async () => {
+    if (!reactivateTarget || !newPosition.trim()) return;
+    setBusy(true);
+    try {
+      await api.workflow.reactivate({ talent_pool_id: reactivateTarget.id, position: newPosition.trim() });
+      toast(`已为「${reactivateTarget.original_position}」候选人重新激活流程`);
+      setReactivateTarget(null); setNewPosition("");
+      load();
+    } catch (e) { toast(errDetail(e), "err"); }
+    finally { setBusy(false); }
+  };
 
   return (
-    <div className="space-y-6">
-      {/* 头部 */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-bold text-gray-800">招聘流程管道</h2>
-          <p className="text-sm text-gray-400 mt-0.5">拖拽式看板，一目了然的招聘进度</p>
-        </div>
-        <button onClick={loadData} className="btn-secondary flex items-center gap-2">
-          <RefreshCw className="w-4 h-4" /> 刷新
-        </button>
-      </div>
+    <>
+      <PageHeader
+        title="招聘管道"
+        desc={`共 ${data.total} 位候选人在管道中`}
+        actions={<Button variant="outline" onClick={load}><RefreshCw size={14} /> 刷新</Button>}
+      />
 
-      {/* 看板 */}
-      <div className="flex gap-4 overflow-x-auto pb-4 snap-x snap-mandatory">
-        {stageConfig.map((stage, idx) => {
-          const items = grouped[stage.key] || []
-          const count = pipeline?.status_counts?.[stage.key] || 0
-          return (
-            <div key={stage.key} className="flex-shrink-0 w-72 snap-start">
-              <div className="glass-card overflow-hidden">
-                {/* 阶段头 */}
-                <div className={`px-4 py-3 bg-gradient-to-r ${stage.color} bg-opacity-10`}>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className={`w-2 h-2 rounded-full ${stage.dot} ring-2 ring-white`} />
-                      <span className="text-sm font-semibold text-gray-700">{stage.label}</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs font-medium text-gray-500">{count}</span>
-                      {idx < stageConfig.length - 1 && (
-                        <ArrowRight className="w-3 h-3 text-gray-300" />
-                      )}
-                    </div>
+      {/* 漏斗 */}
+      <Card className="p-5 mb-6">
+        <div className="space-y-3">
+          {STAGE_KEYS.map((s, i) => {
+            const v = data.stages[s] ?? 0;
+            return (
+              <div key={s} className="flex items-center gap-3 text-sm">
+                <span className="w-20 shrink-0 text-slate-500">{s}</span>
+                <div className="flex-1 h-7 bg-slate-100 rounded-lg overflow-hidden">
+                  <div className={`h-full ${STAGE_COLORS[i]} rounded-lg transition-all duration-500 flex items-center justify-end pr-2 min-w-[34px]`}
+                    style={{ width: `${Math.max(4, (v / maxStage) * 100)}%` }}>
+                    <span className="text-white text-xs font-semibold tabular-nums drop-shadow">{v}</span>
                   </div>
                 </div>
-
-                {/* 卡片列表 */}
-                <div className="p-3 space-y-2 max-h-[520px] overflow-auto">
-                  {items.map((c: any) => (
-                    <div key={c.id}
-                         onClick={() => navigate(`/candidates/${c.id}`)}
-                         className="p-3 rounded-xl bg-white border border-gray-100 hover:border-indigo-200 hover:shadow-md hover:shadow-indigo-500/5 cursor-pointer transition-all duration-200 group">
-                      <div className="flex items-start justify-between mb-2">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0">
-                            {c.name?.[0] || '?'}
-                          </div>
-                          <div>
-                            <p className="text-sm font-medium text-gray-800 group-hover:text-indigo-600 transition-colors">{c.name}</p>
-                            <p className="text-[11px] text-gray-400">{c.position}</p>
-                          </div>
-                        </div>
-                        {c.match_score != null && (
-                          <span className={`text-xs font-bold px-2 py-0.5 rounded-md ${
-                            c.match_score >= 70
-                              ? 'bg-emerald-50 text-emerald-600'
-                              : c.match_score >= 50
-                              ? 'bg-amber-50 text-amber-600'
-                              : 'bg-red-50 text-red-600'
-                          }`}>
-                            {c.match_score}
-                          </span>
-                        )}
-                      </div>
-
-                      {/* 操作按钮 */}
-                      <div onClick={e => e.stopPropagation()}>
-                        {c.status !== 'hired' && c.status !== 'rejected' && (
-                          <button onClick={() => handleAutoProcess(c.id)} disabled={processing === c.id}
-                                  className="flex items-center justify-center gap-1.5 w-full px-3 py-1.5 text-xs font-medium rounded-lg transition-all duration-200
-                                    bg-gradient-to-r from-indigo-50 to-purple-50 text-indigo-600
-                                    hover:from-indigo-100 hover:to-purple-100
-                                    disabled:opacity-50 disabled:cursor-not-allowed">
-                            {processing === c.id ? (
-                              <><RefreshCw className="w-3 h-3 animate-spin" /> 处理中</>
-                            ) : (
-                              <><Zap className="w-3 h-3" /> 自动推进</>
-                            )}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                  {items.length === 0 && (
-                    <div className="py-8 text-center">
-                      <div className="w-10 h-10 mx-auto mb-2 rounded-xl bg-gray-100 flex items-center justify-center">
-                        <Play className="w-4 h-4 text-gray-300" />
-                      </div>
-                      <p className="text-xs text-gray-400">暂无</p>
-                    </div>
-                  )}
-                </div>
               </div>
-            </div>
-          )
+            );
+          })}
+        </div>
+      </Card>
+
+      {/* 最近候选人 */}
+      <h3 className="text-sm font-semibold text-slate-700 mb-3">最近录入</h3>
+      <div className="grid grid-cols-4 gap-4 mb-8">
+        {data.recent.map((r) => {
+          const m = statusMeta(r.status);
+          return (
+            <Card key={r.id} className="p-4 hover:shadow-pop cursor-pointer transition-shadow" >
+              <div onClick={() => nav(`/candidates/${r.id}`)}>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-medium text-slate-800">{r.name}</span>
+                  <Badge label={m.label} cls={m.cls} />
+                </div>
+                <p className="text-xs text-slate-400 truncate">{r.position}</p>
+                {r.match_score != null && (
+                  <p className={`mt-2 text-lg font-semibold tabular-nums ${r.match_score >= 80 ? "text-emerald-600" : r.match_score >= 60 ? "text-amber-600" : "text-rose-500"}`}>
+                    {r.match_score.toFixed(0)}<span className="text-xs text-slate-300 ml-1">分</span>
+                  </p>
+                )}
+              </div>
+            </Card>
+          );
         })}
       </div>
 
-      {/* 统计概览 */}
-      {pipeline && (
-        <div className="glass-card p-6">
-          <h3 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
-            <div className="w-1 h-4 rounded-full bg-indigo-500" />
-            管道统计
-          </h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {[
-              { label: '总候选人', value: pipeline.total, color: 'from-indigo-50 to-blue-50', textColor: 'text-indigo-700' },
-              { label: '已录用', value: pipeline.status_counts?.hired || 0, color: 'from-emerald-50 to-green-50', textColor: 'text-emerald-700' },
-              { label: '面试中', value: (pipeline.status_counts?.scheduled || 0) + (pipeline.status_counts?.interviewed || 0), color: 'from-blue-50 to-cyan-50', textColor: 'text-blue-700' },
-              { label: '已拒绝', value: pipeline.status_counts?.rejected || 0, color: 'from-red-50 to-pink-50', textColor: 'text-red-700' },
-            ].map(s => (
-              <div key={s.label} className={`rounded-xl bg-gradient-to-br ${s.color} p-4`}>
-                <p className="text-xs text-gray-500 mb-1">{s.label}</p>
-                <p className={`text-2xl font-bold ${s.textColor}`}>{s.value}</p>
-              </div>
-            ))}
-          </div>
-        </div>
+      {/* 人才池 */}
+      <h3 className="text-sm font-semibold text-slate-700 mb-3">人才池 ({pool.length})</h3>
+      {pool.length === 0 ? (
+        <EmptyState text="人才池暂无记录" />
+      ) : (
+        <Card>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs text-slate-400 border-b border-slate-100">
+                <th className="px-5 py-3 font-medium">岗位</th>
+                <th className="px-5 py-3 font-medium">匹配分</th>
+                <th className="px-5 py-3 font-medium">技能</th>
+                <th className="px-5 py-3 font-medium">入池原因</th>
+                <th className="px-5 py-3"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {pool.map((t) => (
+                <tr key={t.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/70">
+                  <td className="px-5 py-3.5 font-medium text-slate-800">
+                    <button className="hover:text-brand-600" onClick={() => nav(`/candidates/${t.candidate_id}`)}>#{t.candidate_id} · {t.original_position}</button>
+                  </td>
+                  <td className="px-5 py-3.5 tabular-nums">{t.match_score?.toFixed(1) ?? "—"}</td>
+                  <td className="px-5 py-3.5 max-w-52">
+                    <div className="flex flex-wrap gap-1">
+                      {t.skills.slice(0, 4).map((s) => (
+                        <span key={s} className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500">{s}</span>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="px-5 py-3.5 text-slate-500 truncate max-w-48" title={t.pool_reason ?? ""}>{t.pool_reason ?? "—"}</td>
+                  <td className="px-5 py-3.5 text-right">
+                    <Button variant="outline" onClick={() => setReactivateTarget(t)}><RefreshCw size={13} /> 重新激活</Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
       )}
-    </div>
-  )
+
+      <Modal open={!!reactivateTarget} onClose={() => setReactivateTarget(null)} title="从人才池重新激活">
+        <Field label="新的应聘岗位">
+          <Input value={newPosition} onChange={(e) => setNewPosition(e.target.value)}
+            placeholder={reactivateTarget?.original_position} autoFocus />
+        </Field>
+        <p className="text-xs text-slate-400 mb-4 flex items-center gap-1"><Phone size={12} /> 系统将重置候选人状态并重新进入 AI 分流</p>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={() => setReactivateTarget(null)}>取消</Button>
+          <Button loading={busy} disabled={!newPosition.trim()} onClick={doReactivate}>确认激活</Button>
+        </div>
+      </Modal>
+    </>
+  );
 }

@@ -1,0 +1,46 @@
+# Backend ???FastAPI + LangGraph ??????
+# ? backend/pyproject.toml ? [project.dependencies] ??????????? pip install -r?
+# ???pip install -r requirements.txt   ?   pip install -e .?? pyproject.toml?
+
+# ===== Web ?? =====
+fastapi>=0.139.0
+uvicorn[standard]>=0.51.0
+pydantic>=2.13.0
+pydantic-settings>=2.14.0
+
+# ===== ??? =====
+sqlalchemy>=2.0.51
+aiosqlite>=0.22.0          # ??/SQLite
+aiomysql>=0.3.0            # ?? MySQL
+pymysql>=1.1.0             # MySQL ??
+
+# ===== LLM / ??? =====
+openai>=2.45.0             # OpenAI ????
+langgraph>=1.2.0           # ????????
+langchain-text-splitters>=1.1.0
+pymilvus>=2.6.0,<3.0       # ????????
+mcp>=1.28.0,<2.0              # MCP 协议（1.x 装饰器 API，2.x 不兼容）????
+
+# ===== ???? =====
+python-docx>=1.2.0
+PyMuPDF>=1.28.0
+# ===== 图片/扫描件 OCR（2.x 稳定版，3.x 存在推理 bug 勿升级）=====
+paddleocr>=2.8.0,<3.0
+paddlepaddle>=2.6.0,<3.0
+
+# ===== ???? / ?? =====
+aio-pika>=9.4.0            # RabbitMQ????? + ?? + ???
+
+# ===== ?? =====
+python-jose[cryptography]>=3.5.0
+bcrypt>=5.0.0
+
+# ===== ?? =====
+twilio>=9.3.0
+
+# ===== ?? =====
+httpx>=0.28.0
+python-multipart>=0.0.32
+python-dateutil>=2.9.0
+pytz>=2024.2
+jinja2>=3.1.4

@@ -1,121 +1,145 @@
-import { useState, useEffect } from 'react'
-import { Send, FileText, ExternalLink } from 'lucide-react'
-import { questionnairesApi, candidatesApi } from '../lib/api'
-import { showToast } from '../components/Toast'
+import { useEffect, useState } from "react";
+import { FileText, Search } from "lucide-react";
+import { api, errDetail } from "../lib/api";
+import { Badge, Button, Card, EmptyState, Input, PageHeader, Select, Spinner, useToast } from "../components/ui";
+import type { QuestionnaireOverviewItem } from "../types";
+
+const pageSize = 15;
+
+const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
+  completed: { label: "已完成", cls: "bg-emerald-50 text-emerald-600" },
+  sent:      { label: "待完成", cls: "bg-purple-50 text-purple-600" },
+};
+const qStatus = (s: string) => STATUS_BADGE[s] ?? { label: s, cls: "bg-slate-100 text-slate-500" };
 
 export default function Questionnaires() {
-  const [candidates, setCandidates] = useState<any[]>([])
-  const [sentRecords, setSentRecords] = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
-  const [sending, setSending] = useState<number | null>(null)
+  const { toast } = useToast();
+  const [items, setItems] = useState<QuestionnaireOverviewItem[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(true);
 
-  const QUESTIONNAIRE_LINK = 'https://www.qingsuyun.com/h5/251261/18081878897/'
+  const [status, setStatus] = useState("");
+  const [kw, setKw] = useState("");
+  const [searchText, setSearchText] = useState("");
 
-  useEffect(() => { loadData() }, [])
+  const load = (p: number, st: string, keyword: string) => {
+    setLoading(true);
+    api.questionnaires.list({
+      page: p,
+      page_size: pageSize,
+      status: st || undefined,
+      search: keyword || undefined,
+    })
+      .then((r) => { setItems(r.data.items); setTotal(r.data.total); setPage(p); })
+      .catch((e) => toast(errDetail(e), "err"))
+      .finally(() => setLoading(false));
+  };
 
-  const loadData = async () => {
-    setLoading(true)
-    try {
-      const c = await candidatesApi.list({ page_size: 100 })
-      setCandidates(c.items)
+  useEffect(() => { load(1, "", ""); /* eslint-disable-next-line */ }, []);
 
-      // 加载所有候选人的问卷记录
-      const all: any[] = []
-      for (const cand of c.items) {
-        try {
-          const qs = await questionnairesApi.getByCandidate(cand.id)
-          all.push(...(Array.isArray(qs) ? qs : []))
-        } catch { }
-      }
-      setSentRecords(all.sort((a, b) =>
-        new Date(b.sent_at || b.created_at).getTime() - new Date(a.sent_at || a.created_at).getTime()
-      ))
-    } catch (e: any) {
-      showToast('error', '加载失败', e.message)
-    } finally {
-      setLoading(false)
-    }
-  }
+  const doSearch = () => { setKw(searchText.trim()); setPage(1); load(1, status, searchText.trim()); };
+  const changeStatus = (v: string) => { setStatus(v); setPage(1); load(1, v, kw); };
+  const prev = () => load(page - 1, status, kw);
+  const next = () => load(page + 1, status, kw);
 
-  const handleSend = async (candidateId: number) => {
-    setSending(candidateId)
-    try {
-      await questionnairesApi.sendLink(candidateId)
-      showToast('success', '问卷链接已发送', '候选人将收到邮件通知')
-      loadData()
-    } catch (e: any) {
-      showToast('error', '发送失败', e.message)
-    } finally {
-      setSending(null)
-    }
-  }
+  const hasFilter = status !== "" || kw !== "";
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-bold text-gray-800">发送问卷</h2>
-          <p className="text-sm text-gray-400 mt-0.5">向候选人发送轻速云问卷链接</p>
-        </div>
-        <a href={QUESTIONNAIRE_LINK} target="_blank" rel="noopener noreferrer"
-          className="btn-secondary flex items-center gap-2 text-sm">
-          <ExternalLink className="w-4 h-4" /> 打开问卷
-        </a>
-      </div>
+    <>
+      <PageHeader
+        title="问卷管理"
+        desc="全部候选人的问卷发送与答题情况（右上角筛选 / 搜索）"
+        actions={
+          <div className="flex gap-2">
+            <div className="relative w-72">
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <Input
+                placeholder="搜索姓名 / 手机…"
+                className="!pl-8"
+                value={searchText}
+                onChange={(e) => setSearchText(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && doSearch()}
+              />
+            </div>
+            <div className="w-40 shrink-0">
+              <Select value={status} onChange={(e) => changeStatus(e.target.value)}>
+                <option value="">全部状态</option>
+                <option value="sent">待完成</option>
+                <option value="completed">已完成</option>
+              </Select>
+            </div>
+          </div>
+        }
+      />
 
-      {/* 快速发送 */}
-      <div className="glass-card p-5">
-        <h3 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
-          <Send className="w-4 h-4 text-indigo-500" /> 快速发送
-        </h3>
-        <div className="flex flex-wrap gap-2">
-          {candidates
-            .filter(c => c.status !== 'hired' && c.status !== 'rejected')
-            .map(cand => (
-              <button key={cand.id} onClick={() => handleSend(cand.id)} disabled={sending === cand.id}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all
-                  bg-gradient-to-br from-indigo-50 to-purple-50 text-indigo-700
-                  hover:shadow-md hover:shadow-indigo-500/10 border border-indigo-100/60
-                  disabled:opacity-50 disabled:cursor-not-allowed">
-                <Send className="w-3.5 h-3.5" />
-                {sending === cand.id ? '发送中...' : cand.name}
-                <span className="text-[11px] text-gray-400 ml-1">{cand.position}</span>
-              </button>
-            ))}
-          {candidates.filter(c => c.status !== 'hired' && c.status !== 'rejected').length === 0 && (
-            <p className="text-sm text-gray-400 py-2">暂无待发送的候选人</p>
-          )}
-        </div>
-      </div>
+      {loading && items.length === 0 ? (
+        <Spinner />
+      ) : total === 0 ? (
+        <EmptyState
+          icon={<FileText size={36} />}
+          text={hasFilter ? "没有符合条件的问卷记录" : "还没有向候选人发送过问卷"}
+        />
+      ) : (
+        <>
+          <Card>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-slate-400 border-b border-slate-100">
+                  <th className="px-5 py-3 font-medium">候选人</th>
+                  <th className="px-5 py-3 font-medium">应聘岗位</th>
+                  <th className="px-5 py-3 font-medium">问卷</th>
+                  <th className="px-5 py-3 font-medium">状态</th>
+                  <th className="px-5 py-3 font-medium">答题情况</th>
+                  <th className="px-5 py-3 font-medium">发送时间</th>
+                  <th className="px-5 py-3 font-medium">完成时间</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((q) => {
+                  const st = qStatus(q.status);
+                  return (
+                    <tr key={q.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/70 transition-colors">
+                      <td className="px-5 py-3.5">
+                        <p className="font-medium text-slate-800">{q.candidate_name || "—"}</p>
+                        {q.candidate_phone && <p className="text-xs text-slate-400 tabular-nums">{q.candidate_phone}</p>}
+                      </td>
+                      <td className="px-5 py-3.5 text-slate-600">{q.position || "—"}</td>
+                      <td className="px-5 py-3.5 text-slate-700">{q.title}</td>
+                      <td className="px-5 py-3.5"><Badge label={st.label} cls={st.cls} /></td>
+                      <td className="px-5 py-3.5">
+                        {q.status === "completed" ? (
+                          <span className="text-xs text-emerald-600">
+                            已完成
+                            {q.completed_at && <span className="text-slate-400"> · {new Date(q.completed_at).toLocaleDateString()}</span>}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-slate-400">待填写（暂无作答数据）</span>
+                        )}
+                      </td>
+                      <td className="px-5 py-3.5 text-slate-500 tabular-nums whitespace-nowrap">
+                        {q.sent_at ? new Date(q.sent_at).toLocaleString() : "—"}
+                      </td>
+                      <td className="px-5 py-3.5 text-slate-500 tabular-nums whitespace-nowrap">
+                        {q.completed_at ? new Date(q.completed_at).toLocaleString() : "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </Card>
 
-      {/* 已发送记录 */}
-      <div>
-        <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
-          <FileText className="w-4 h-4 text-gray-400" /> 发送记录
-        </h3>
-        <div className="space-y-2">
-          {sentRecords.map((q: any) => {
-            const cand = candidates.find(c => c.id === q.candidate_id)
-            return (
-              <div key={q.id} className="glass-card p-4 flex items-center justify-between">
-                <div>
-                  <span className="font-medium text-gray-800">{cand?.name || `#${q.candidate_id}`}</span>
-                  <span className="text-gray-400 mx-2">·</span>
-                  <span className="text-sm text-gray-500">{cand?.position || '-'}</span>
-                  <span className="text-gray-300 mx-2">·</span>
-                  <span className="text-xs text-gray-400">{q.sent_at?.slice(0, 10) || '-'}</span>
-                </div>
-                <span className={`status-badge ${q.status}`}>
-                  {q.status === 'sent' ? '已发送' : q.status}
-                </span>
-              </div>
-            )
-          })}
-          {sentRecords.length === 0 && !loading && (
-            <div className="text-center py-12 text-gray-400">暂无发送记录</div>
-          )}
-        </div>
-      </div>
-    </div>
-  )
+          <div className="flex items-center justify-between mt-4">
+            <p className="text-xs text-slate-400">共 {total} 条 · 第 {page} / {totalPages} 页</p>
+            <div className="flex gap-2">
+              <Button variant="outline" disabled={page <= 1} onClick={prev}>上一页</Button>
+              <Button variant="outline" disabled={page >= totalPages} onClick={next}>下一页</Button>
+            </div>
+          </div>
+        </>
+      )}
+    </>
+  );
 }

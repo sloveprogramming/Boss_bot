@@ -11,7 +11,7 @@ from alembic import context
 # 导入项目配置和所有模型 Base
 import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "src"))
 from app.config import settings
 from app.database import Base
 

@@ -51,11 +51,9 @@ class TestCandidateEndpoints:
 
     @pytest.mark.asyncio
     async def test_list_candidates(self, async_client):
-        """GET /api/candidates 应返回列表"""
+        """未认证访问候选人信息应被拒绝。"""
         response = await async_client.get("/api/candidates")
-        assert response.status_code == 200
-        data = response.json()
-        assert "items" in data or isinstance(data, list)
+        assert response.status_code == 401
 
 
 class TestRAGChatEndpoint:
@@ -63,17 +61,15 @@ class TestRAGChatEndpoint:
 
     @pytest.mark.asyncio
     async def test_chat_without_message(self, async_client):
-        """POST /api/policy/chat 缺少 message 应报 422"""
+        """未认证访问制度问答应被拒绝。"""
         response = await async_client.post("/api/policy/chat", json={})
-        assert response.status_code == 422
+        assert response.status_code == 401
 
     @pytest.mark.asyncio
     async def test_chat_with_message(self, async_client):
-        """有 message 的请求应正常处理"""
-        # 由于依赖真实 LLM，这里只验证路由存在
+        """未认证访问制度问答应被拒绝。"""
         response = await async_client.post(
             "/api/policy/chat",
             json={"message": "年假有几天？", "session_id": "test-session"},
         )
-        # 可能因 LLM 调用失败返回 500，但路由应存在
-        assert response.status_code in (200, 500)
+        assert response.status_code == 401

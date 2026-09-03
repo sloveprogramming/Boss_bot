@@ -23,6 +23,7 @@ milvus_data/
 node_modules/
 frontend/dist/
 frontend/.next/
+*.tsbuildinfo
 
 # OS
 .DS_Store
@@ -46,6 +47,9 @@ env/
 # Coverage
 .coverage
 htmlcov/
+
+# Local runtime output
+*.log
 
 # WorkBuddy
 .workbuddy/

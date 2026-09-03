@@ -1,10 +1,4 @@
 """招聘流程编排测试 — LangGraph 状态机 + 阈值分流"""
-import pytest
-from unittest.mock import patch, AsyncMock
-
-pytestmark = pytest.mark.asyncio
-
-
 class TestWorkflowState:
     """工作流状态定义测试"""
 

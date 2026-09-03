@@ -1,28 +1,4 @@
 {
-  "compilerOptions": {
-    "target": "ES2020",                          // 编译目标：ES2020
-    "useDefineForClassFields": true,             // 使用ES的类字段定义
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],    // 引用标准库类型
-    "module": "ESNext",                          // 使用最新的ES Module
-    "skipLibCheck": true,                        // 跳过第三方库的类型检查（加快编译）
-
-    /* 模块解析 */
-    "moduleResolution": "bundler",               // 使用bundler解析策略
-    "allowImportingTsExtensions": true,          // 允许在import中写.ts扩展名
-    "isolatedModules": true,                     // 每个文件独立编译
-    "moduleDetection": "force",                  // 强制检测模块类型
-    "noEmit": true,                              // 不输出编译文件（Vite负责打包）
-
-    /* JSX支持 */
-    "jsx": "react-jsx",                          // React JSX转换
-
-    /* 严格模式 */
-    "strict": true,                              // 启用所有严格类型检查
-
-    /* 宽松设置 */
-    "noUnusedLocals": false,                     // 不检查未使用的局部变量
-    "noUnusedParameters": false,                 // 不检查未使用的参数
-    "noFallthroughCasesInSwitch": true           // switch语句必须有break
-  },
-  "include": ["src"]                             // 仅编译src目录
+  "files": [],
+  "references": [{ "path": "./tsconfig.app.json" }, { "path": "./tsconfig.node.json" }]
 }

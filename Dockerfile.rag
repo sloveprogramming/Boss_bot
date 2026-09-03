@@ -1,0 +1,22 @@
+# AI ???? ? RAG Service Dockerfile
+# ????? = ??????????????rag_service/requirements.txt?
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# ??????
+RUN apt-get update && apt-get install -y \
+    gcc g++ curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# ?? Python ???rag ?????
+COPY rag_service/requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt \
+    -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+# ?? RAG ???src ???rag_service/src/app?
+COPY rag_service/ .
+
+EXPOSE 18003
+
+CMD ["uvicorn", "app.main:app", "--app-dir", "src", "--host", "0.0.0.0", "--port", "18003"]

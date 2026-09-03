@@ -1,0 +1,66 @@
+# Docker 构建上下文排除（避免大文件进入镜像构建）
+
+# 版本控制
+.git/
+.gitignore
+.gitattributes
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# 虚拟环境
+.venv/
+venv/
+env/
+
+# Node (frontend 不在 backend/rag 镜像中)
+frontend/node_modules/
+frontend/dist/
+frontend/.next/
+frontend/package-lock.json
+
+# IDE / 编辑器
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# WorkBuddy 内存/缓存
+.workbuddy/
+
+# 文档/笔记（不参与运行）
+*.md
+!README.md
+README.md
+知识点/
+
+# 测试数据 / 临时文件
+uploads/
+dco_document/
+docker-data/
+*.db
+*.db-journal
+*.log
+
+# 迁移文件（不参与构建）
+backend/migrations/
+
+# 旧 Python 二进制文件
+*.so
+
+# 本地配置（容器内通过 env_file 注入）
+.env
+.env.local

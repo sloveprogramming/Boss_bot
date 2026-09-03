@@ -12,12 +12,12 @@ import time
 import sys
 import os
 
-BASE = "E:/agent_class/Boos_bot"
+BASE = "E:/WorkTool/agent_class/Boos_bot"
 
 # ===== 核心服务（必启） =====
 services = [
     ("Backend API (含 LangGraph)", "18000", f"{BASE}/backend",
-     ["python", "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "18000"]),
+     ["python", "-m", "uvicorn", "app.main:app", "--app-dir", "src", "--host", "127.0.0.1", "--port", "18000"]),
     ("Frontend",                  "18016", f"{BASE}/frontend",
      ["npx", "vite", "--host", "127.0.0.1", "--port", "18016"]),
 ]

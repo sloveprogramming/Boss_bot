@@ -1,0 +1,11 @@
+{
+  "include": ["backend/src", "rag_service/src"],
+  "extraPaths": ["backend/src", "rag_service/src"],
+  "pythonVersion": "3.11",
+  "typeCheckingMode": "basic",
+  "reportMissingImports": "warning",
+  "reportMissingModuleSource": "warning",
+  "reportMissingTypeStubs": false,
+  "reportImportCycles": false,
+  "reportUnusedImport": false
+}

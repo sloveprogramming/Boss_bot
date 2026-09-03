@@ -1,273 +1,190 @@
-/** API 客户端 */
-const BASE = '/api'
+import axios from "axios";
+import type {
+  Candidate, Page, ResumeAnalysis, ResumeUploadResponse, DashboardStats,
+  Questionnaire, Interview, InterviewSlotResponse, TalentPoolItem,
+  PipelineOverview, ExamAnalysisItem, CalendarInterviewResponse,
+  QuestionnaireOverviewItem, ScoringInsights, ScoringIteration, User,
+} from "../types";
 
-/** 从 localStorage 读取 JWT Token */
-function getToken(): string | null {
-  try {
-    const data = JSON.parse(localStorage.getItem('boos_bot_auth') || '{}')
-    return data?.token || null
-  } catch {
-    return null
-  }
-}
+export const TOKEN_KEY = "recruit_token";
+export const USER_KEY = "recruit_user";
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const token = getToken()
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(options?.headers as Record<string, string>),
-  }
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`
-  }
-  const res = await fetch(`${BASE}${path}`, { ...options, headers })
-  if (res.status === 401) {
-    // token 过期或无效，清除本地认证状态
-    localStorage.removeItem('boos_bot_auth')
-    window.location.href = '/login'
-    throw new Error('登录已过期，请重新登录')
-  }
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(err.detail || `HTTP ${res.status}`)
-  }
-  return res.json()
-}
+export const getToken = () => localStorage.getItem(TOKEN_KEY) ?? "";
+export const setAuth = (token: string, user: User) => {
+  localStorage.setItem(TOKEN_KEY, token);
+  localStorage.setItem(USER_KEY, JSON.stringify(user));
+};
+export const clearAuth = () => {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(USER_KEY);
+};
+export const getCachedUser = (): User | null => {
+  try { return JSON.parse(localStorage.getItem(USER_KEY) ?? "null"); } catch { return null; }
+};
 
-// ========== 候选人 ==========
-export interface Candidate {
-  id: number; name: string; phone?: string; email?: string
-  position: string; source: string; status: string
-  match_score?: number; tags: string[]
-  experience_years?: number; job_category?: string
-  talent_pool_id?: number; talent_pool_reason?: string
-  created_at: string; updated_at: string
-}
+// ===== 主后端 axios 实例（前后端分离：所有数据只走 HTTP API） =====
+export const http = axios.create({
+  baseURL: import.meta.env.VITE_API_BASE || "", // 开发态走 Vite 代理；生产可配环境变量
+  timeout: 60_000,
+});
 
-export const candidatesApi = {
-  list: (params?: { page?: number; page_size?: number; status?: string; search?: string }) => {
-    const q = new URLSearchParams()
-    if (params?.page) q.set('page', String(params.page))
-    if (params?.page_size) q.set('page_size', String(params.page_size))
-    if (params?.status) q.set('status', params.status)
-    if (params?.search) q.set('search', params.search)
-    return request<{ total: number; items: Candidate[]; page: number; page_size: number }>(
-      `/candidates?${q}`
-    )
+http.interceptors.request.use((cfg) => {
+  const t = getToken();
+  if (t) cfg.headers.Authorization = `Bearer ${t}`;
+  return cfg;
+});
+
+http.interceptors.response.use(
+  (res) => res,
+  (err) => {
+    if (err?.response?.status === 401 && location.pathname !== "/login") {
+      clearAuth();
+      location.href = "/login";
+    }
+    return Promise.reject(err);
   },
-  get: (id: number) => request<Candidate>(`/candidates/${id}`),
-  create: (data: Partial<Candidate>) =>
-    request<Candidate>('/candidates', { method: 'POST', body: JSON.stringify(data) }),
-  update: (id: number, data: Partial<Candidate>) =>
-    request<Candidate>(`/candidates/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  delete: (id: number) =>
-    request<{ status: string }>(`/candidates/${id}`, { method: 'DELETE' }),
-}
+);
 
-// ========== 简历 ==========
-export interface ResumeAnalysis {
-  id: number; candidate_id: number; candidate_name: string
-  original_filename?: string
-  analysis?: {
-    basic_info: any; education: any[]; work_experience: any[]
-    skills: string[]; projects: any[]; certifications: string[]
-  }
-  match_analysis?: {
-    overall_score: number; dimensions: Record<string, number>
-    strengths: string[]; risks: string[]; recommended_questions: string[]
-  }
-  summary?: string; analyzed_at?: string
-}
+export const errDetail = (e: unknown): string => {
+  const r = (e as { response?: { data?: { detail?: string } } })?.response?.data;
+  if (typeof r?.detail === "string") return r.detail;
+  try { return JSON.stringify(r ?? e); } catch { return String(e); }
+};
 
-export const resumesApi = {
-  upload: async (candidateId: number, file: File) => {
-    const form = new FormData()
-    form.append('candidate_id', String(candidateId))
-    form.append('file', file)
-    const res = await fetch(`${BASE}/resumes/upload`, { method: 'POST', body: form })
-    return res.json()
-  },
-  analyze: (resumeId: number, jobDescription: string = '') => {
-    const form = new FormData()
-    form.append('job_description', jobDescription)
-    return fetch(`${BASE}/resumes/${resumeId}/analyze`, { method: 'POST', body: form }).then(r => r.json()) as Promise<ResumeAnalysis>
-  },
-  getByCandidate: (candidateId: number) =>
-    request<ResumeAnalysis>(`/resumes/candidate/${candidateId}`),
-}
+// ===== RAG 服务（独立 :18003） =====
+const RAG_BASE = import.meta.env.VITE_RAG_BASE || "/rag-api";
 
-// ========== 问卷 ==========
-export interface Questionnaire {
-  id: number; candidate_id: number; title: string
-  questions: any[]; status: string
-  sent_at?: string; completed_at?: string; deadline?: string
-}
-
-export const questionnairesApi = {
-  sendLink: (candidateId: number) =>
-    request<{ status: string; questionnaire_id: number; link: string }>('/questionnaires/send-link', {
-      method: 'POST', body: JSON.stringify({ candidate_id: candidateId })
-    }),
-  getByCandidate: (candidateId: number) =>
-    request<Questionnaire[]>(`/questionnaires/candidate/${candidateId}`),
-}
-
-// ========== 面试 ==========
-export interface Interview {
-  id: number; candidate_id: number; candidate_name: string
-  round: string; status: string; interviewers: string[]
-  proposed_slots?: any[]; confirmed_start?: string; confirmed_end?: string
-  location?: string; meeting_link?: string; feedback?: any
-}
-
-export const interviewsApi = {
-  generateSlots: (data: {
-    candidate_id: number; date_range_start: string; date_range_end: string
-    duration_minutes?: number; round?: string
-    working_hours_start?: string; working_hours_end?: string
-  }) => request<{ interview_id: number; proposed_slots: any[] }>('/interviews/generate-slots', {
-    method: 'POST', body: JSON.stringify({ interviewers: ['面试官'], date_range_start: data.date_range_start, date_range_end: data.date_range_end, ...data })
-  }),
-  confirmSlot: (data: { interview_id: number; selected_slot: any; location?: string; meeting_link?: string }) =>
-    request<Interview>('/interviews/confirm-slot', { method: 'POST', body: JSON.stringify(data) }),
-  submitFeedback: (data: { interview_id: number; interviewer: string; rating: number; strengths: string[]; weaknesses: string[]; decision: string; detail: string }) =>
-    request('/interviews/feedback', { method: 'POST', body: JSON.stringify(data) }),
-  getByCandidate: (candidateId: number) =>
-    request<Interview[]>(`/interviews/candidate/${candidateId}`),
-}
-
-// ========== 制度 Agent ==========
-export const policyApi = {
-  chat: (data: { message: string; session_id?: string; candidate_id?: number }) =>
-    request<{ session_id: string; answer: string; confidence: string; cited_sources: any[]; disclaimer?: string }>('/policy/chat', { method: 'POST', body: JSON.stringify(data) }),
-
-  /** SSE 流式聊天 — 对接后端 /api/policy/chat/stream */
-  chatStream: (data: { message: string; session_id?: string }, onToken: (text: string) => void, onEvent?: (type: string, payload: any) => void): Promise<void> => {
-    return new Promise((resolve, reject) => {
-      fetch(`${BASE}/policy/chat/stream`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      }).then(async (response) => {
-        if (!response.ok) {
-          const err = await response.json().catch(() => ({ detail: 'SSE error' }))
-          reject(new Error(err.detail || `HTTP ${response.status}`))
-          return
-        }
-        const reader = response.body?.getReader()
-        if (!reader) { reject(new Error('No reader')); return }
-        const decoder = new TextDecoder()
-        let buffer = ''
-        let currentEvent = ''
-
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          buffer += decoder.decode(value, { stream: true })
-          const lines = buffer.split('\n')
-          buffer = lines.pop() || ''
-          for (const line of lines) {
-            if (line.startsWith('event: ')) {
-              currentEvent = line.slice(7).trim()
-            } else if (line.startsWith('data: ')) {
-              try {
-                const dataStr = line.slice(6)
-                const payload = JSON.parse(dataStr)
-                if (currentEvent === 'done') {
-                  if (payload.sources && onEvent) onEvent('sources', { sources: payload.sources })
-                  resolve()
-                  return
-                }
-                if (currentEvent === 'token' || !currentEvent) {
-                  if (payload.text) onToken(payload.text)
-                }
-                if (onEvent && currentEvent) {
-                  onEvent(currentEvent, payload)
-                }
-              } catch {
-                // skip invalid JSON
-              }
-            }
-          }
-        }
-        resolve()
-      }).catch(reject)
-    })
-  },
-
-  documents: {
-    list: () => request<any[]>('/policy/documents'),
-    upload: async (title: string, category: string, file: File) => {
-      const form = new FormData()
-      form.append('title', title); form.append('category', category); form.append('file', file)
-      const res = await fetch(`${BASE}/policy/documents/upload`, { method: 'POST', body: form })
-      return res.json()
+/** POST SSE 流式请求，逐块回调；返回完整文本 */
+export async function postSSE(
+  url: string,
+  body: Record<string, unknown>,
+  onDelta: (text: string) => void,
+): Promise<string> {
+  const full = url.startsWith("/api/") ? RAG_BASE + url.slice(4) : url; // /api/chat/... → RAG 服务
+  const res = await fetch(full, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}),
     },
-    delete: (id: number) => request(`/policy/documents/${id}`, { method: 'DELETE' }),
-  },
-  history: (sessionId: string) =>
-    request<{ session_id: string; messages: any[] }>(`/policy/history/${sessionId}`),
-}
-
-// ========== 工作流 ==========
-export const workflowApi = {
-  status: (candidateId: number) => request<any>(`/workflow/status/${candidateId}`),
-  autoProcess: (candidateId: number, jobDescription?: string) =>
-    request<any>(`/workflow/auto-process/${candidateId}`, {
-      method: 'POST', body: JSON.stringify({ job_description: jobDescription || '' })
-    }),
-  pipeline: () => request<any>('/workflow/pipeline'),
-  talentPool: {
-    list: (params?: { page?: number; page_size?: number; status?: string }) => {
-      const q = new URLSearchParams()
-      if (params?.page) q.set('page', String(params.page))
-      if (params?.page_size) q.set('page_size', String(params.page_size))
-      if (params?.status) q.set('status', params.status)
-      return request<any>(`/workflow/talent-pool?${q}`)
-    },
-    get: (id: number) => request<any>(`/workflow/talent-pool/${id}`),
-    contact: (id: number, note: string = '') =>
-      request<any>(`/workflow/talent-pool/${id}/contact`, {
-        method: 'PUT', body: JSON.stringify({ note })
-      }),
-    reactivate: (talentPoolId: number, position: string) =>
-      request<any>('/workflow/talent-pool/reactivate', {
-        method: 'POST', body: JSON.stringify({ talent_pool_id: talentPoolId, position })
-      }),
-  },
-}
-
-// ========== 试卷分析 ==========
-export interface ExamAnalysis {
-  id: number
-  candidate_name: string
-  candidate_phone?: string
-  exam_title: string
-  exam_score?: number
-  exam_total?: number
-  exam_duration?: number
-  analysis_status: string  // pending / analyzing / completed / failed
-  analysis_result?: {
-    overall_score?: number
-    knowledge_dimensions?: Record<string, number>
-    strengths?: string[]
-    weaknesses?: string[]
-    suggestion?: string
-    summary?: string
+    body: JSON.stringify(body),
+  });
+  if (!res.ok || !res.body) throw new Error(`请求失败 (${res.status})`);
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = ""; let answer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const lines = buf.split("\n");
+    buf = lines.pop() ?? "";
+    for (const line of lines) {
+      const s = line.trim();
+      if (!s.startsWith("data:")) continue;
+      const payload = s.slice(5).trim();
+      if (!payload || payload === "[DONE]") continue;
+      try {
+        const j = JSON.parse(payload);
+        // 兼容多种字段：answer / delta / content / token
+        const delta = j.answer ?? j.delta ?? j.content ?? j.token ?? "";
+        if (delta) { answer += delta; onDelta(answer); }
+        if (j.sources) onDelta(answer); // 触发重绘
+      } catch { /* 非 JSON 心跳忽略 */ }
+    }
   }
-  error_message?: string
-  created_at: string
-  analyzed_at?: string
+  return answer;
 }
 
-export const examAnalysisApi = {
-  list: (params?: { page?: number; page_size?: number }) => {
-    const q = new URLSearchParams()
-    if (params?.page) q.set('page', String(params.page))
-    if (params?.page_size) q.set('page_size', String(params.page_size))
-    return request<{ total: number; items: ExamAnalysis[]; page: number; page_size: number }>(`/exam-analysis?${q}`)
+// ===== Auth =====
+export const api = {
+  login: (username: string, password: string) =>
+    http.post<{ access_token: string; username: string; role: string }>("/api/auth/login", { username, password }),
+  register: (data: { username: string; password: string; role?: string; email?: string }) =>
+    http.post<User>("/api/auth/register", data),
+  me: () => http.get<User>("/api/auth/me"),
+
+  dashboardStats: () => http.get<DashboardStats>("/api/dashboard/stats"),
+
+  candidates: {
+    list: (params: { page?: number; page_size?: number; status?: string; search?: string }) =>
+      http.get<Page<Candidate>>("/api/candidates", { params }),
+    get: (id: number) => http.get<Candidate>(`/api/candidates/${id}`),
+    create: (data: Partial<Candidate>) => http.post<Candidate>("/api/candidates", data),
+    update: (id: number, data: Partial<Candidate>) => http.put<Candidate>(`/api/candidates/${id}`, data),
+    remove: (id: number) => http.delete(`/api/candidates/${id}`),
   },
-}
-export const dashboardApi = {
-  stats: () => request<any>('/dashboard/stats'),
-}
+
+  resumes: {
+    upload: (candidateId: number, file: File) => {
+      const fd = new FormData();
+      fd.append("candidate_id", String(candidateId));
+      fd.append("file", file);
+      return http.post<ResumeUploadResponse>("/api/resumes/upload", fd);
+    },
+    analyze: (resumeId: number, jd = "") => {
+      const fd = new FormData();
+      fd.append("job_description", jd);
+      return http.post<ResumeAnalysis>(`/api/resumes/${resumeId}/analyze`, fd);
+    },
+    getByCandidate: (cid: number) =>
+      http.get<ResumeAnalysis>(`/api/resumes/candidate/${cid}`),
+  },
+
+  workflow: {
+    start: (cid: number) => http.post(`/api/workflow/start/${cid}`),
+    autoProcess: (cid: number) => http.post(`/api/workflow/auto-process/${cid}`),
+    pipeline: () => http.get<PipelineOverview>("/api/workflow/pipeline"),
+    talentPool: (params: { page?: number; page_size?: number }) =>
+      http.get<Page<TalentPoolItem>>("/api/workflow/talent-pool", { params }),
+    reactivate: (data: { talent_pool_id: number; position: string }) =>
+      http.post<TalentPoolItem>("/api/workflow/talent-pool/reactivate", data),
+    contact: (poolId: number, note: string) =>
+      http.put(`/api/workflow/talent-pool/${poolId}/contact`, { contact_note: note }),
+  },
+
+  interviews: {
+    generateSlots: (data: Record<string, unknown>) =>
+      http.post<InterviewSlotResponse>("/api/interviews/generate-slots", data),
+    confirmSlot: (data: Record<string, unknown>) =>
+      http.post<Interview>("/api/interviews/confirm-slot", data),
+    feedback: (data: Record<string, unknown>) => http.post("/api/interviews/feedback", data),
+    byCandidate: (cid: number) => http.get<Interview[]>(`/api/interviews/candidate/${cid}`),
+    calendar: (params: { start: string; end: string; candidate_id?: number }) =>
+      http.get<CalendarInterviewResponse>("/api/interviews/calendar", { params }),
+  },
+
+  questionnaires: {
+    sendLink: (candidateId: number) =>
+      http.post("/api/questionnaires/send-link", { candidate_id: candidateId }),
+    byCandidate: (cid: number) => http.get<Questionnaire[]>(`/api/questionnaires/candidate/${cid}`),
+    list: (params: { page?: number; page_size?: number; status?: string; search?: string }) =>
+      http.get<Page<QuestionnaireOverviewItem>>("/api/questionnaires", { params }),
+  },
+
+  policyDocs: {
+    upload: (title: string, category: string, file: File) => {
+      const fd = new FormData();
+      fd.append("title", title);
+      fd.append("category", category);
+      fd.append("file", file);
+      return http.post("/api/policy/documents/upload", fd);
+    },
+    list: () => http.get("/api/policy/documents"),
+    remove: (id: number) => http.delete(`/api/policy/documents/${id}`),
+  },
+  ragChatStream: "/api/chat/stream",
+
+  exam: {
+    list: (params: { page?: number; page_size?: number }) =>
+      http.get<Page<ExamAnalysisItem>>("/api/exam-analysis", { params }),
+  },
+
+  scoring: {
+    insights: () => http.get<ScoringInsights>("/api/scoring/insights"),
+    iterations: (limit = 20) =>
+      http.get<ScoringIteration[]>("/api/scoring/iterations", { params: { limit } }),
+    applyIteration: (data: { to_weights: Record<string, number>; category?: string; note?: string }) =>
+      http.post<ScoringIteration & { warning?: string }>("/api/scoring/iterations", data),
+  },
+};

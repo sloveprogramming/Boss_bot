@@ -2,9 +2,6 @@
 import pytest
 from unittest.mock import patch, AsyncMock
 
-pytestmark = pytest.mark.asyncio
-
-
 class TestLLMClient:
     """LLM 客户端基础功能测试"""
 
