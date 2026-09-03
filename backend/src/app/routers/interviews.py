@@ -225,6 +225,18 @@ async def get_calendar_interviews(
     return {"items": items, "unconfirmed": unconfirmed}
 
 
+@router.post("/{interview_id}/cancel")
+async def cancel_interview(interview_id: int, db: AsyncSession = Depends(get_db)):
+    """取消面试（HR 在面试管理执行；可取消状态见 InterviewScheduler.cancel_interview）"""
+    try:
+        result = await scheduler.cancel_interview(interview_id=interview_id, db=db)
+        logger.info("面试已取消: interview_id=%s", interview_id)
+        return result
+    except ValueError as e:
+        logger.warning("取消面试失败: interview_id=%s error=%s", interview_id, e)
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.get("/{interview_id}", response_model=InterviewResponse)
 async def get_interview(interview_id: int, db: AsyncSession = Depends(get_db)):
     """获取单条面试记录的详情"""

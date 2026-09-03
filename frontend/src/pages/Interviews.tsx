@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   CalendarClock, CalendarPlus, ChevronLeft, ChevronRight,
-  MessageSquareQuote, Clock,
+  MessageSquareQuote, Clock, XCircle,
 } from "lucide-react";
 import { api, errDetail } from "../lib/api";
 import {
@@ -54,6 +54,10 @@ const DECISION_LABEL: Record<string, { label: string; cls: string }> = {
   pending:{ label: "待定",   cls: "bg-amber-50 text-amber-600" },
 };
 
+// 可被 HR 取消的面试状态（与后端 InterviewScheduler.CANCELLABLE_STATUSES 保持一致）
+const CANCELLABLE_STATUSES = new Set(["pending", "awaiting_confirm", "confirmed", "rescheduling"]);
+const canCancel = (s: string) => CANCELLABLE_STATUSES.has(s);
+
 export default function Interviews() {
   const { toast } = useToast();
   const [candidates, setCandidates] = useState<Candidate[]>([]);
@@ -74,6 +78,8 @@ export default function Interviews() {
 
   // 面试详情
   const [detail, setDetail] = useState<CalendarInterviewItem | null>(null);
+  // 取消面试两段式确认（5s 未确认自动还原）
+  const [armCancel, setArmCancel] = useState(false);
 
   // 排期表单
   const [open, setOpen] = useState(false);
@@ -87,11 +93,25 @@ export default function Interviews() {
   const [fbTarget, setFbTarget] = useState<CalendarInterviewItem | null>(null);
   const [fb, setFb] = useState({ rating: 4, strengths: "", weaknesses: "", decision: "pass", detail: "" });
 
+  // 候选人下拉数据：分页拉全量（后端 page_size 上限 100）
   useEffect(() => {
-    api.candidates.list({ page: 1, page_size: 200 })
-      .then((r) => setCandidates(r.data.items))
-      .catch((e) => toast(errDetail(e), "err"))
-      .finally(() => setCandsLoading(false));
+    let alive = true;
+    (async () => {
+      const all: Candidate[] = [];
+      try {
+        for (let p = 1; p <= 20; p++) {
+          const { data } = await api.candidates.list({ page: p, page_size: 100 });
+          all.push(...data.items);
+          if (all.length >= data.total) break; // total=0 时首轮即 break
+        }
+        if (alive) setCandidates(all);
+      } catch (e) {
+        if (alive) toast(errDetail(e), "err");
+      } finally {
+        if (alive) setCandsLoading(false);
+      }
+    })();
+    return () => { alive = false; };
   }, []); // eslint-disable-line
 
   const monthStart = `${y}-${pad(m + 1)}-01`;
@@ -99,7 +119,12 @@ export default function Interviews() {
 
   const loadCalendar = useCallback(() => {
     setLoading(true);
-    api.interviews.calendar({ start: monthStart, end: monthEnd, candidate_id: filterCid ?? undefined })
+    // 未筛选时不要带 candidate_id：axios 会把 undefined/null 序列化成空串 → 后端 422
+    api.interviews.calendar({
+      start: monthStart,
+      end: monthEnd,
+      ...(filterCid != null ? { candidate_id: filterCid } : {}),
+    })
       .then((r) => { setEvents(r.data.items); setUnconfirmed(r.data.unconfirmed); })
       .catch((e) => { toast(errDetail(e), "err"); setEvents([]); setUnconfirmed([]); })
       .finally(() => setLoading(false));
@@ -190,6 +215,25 @@ export default function Interviews() {
       loadCalendar();
     } catch (e) { toast(errDetail(e), "err"); }
     finally { setBusy(false); }
+  };
+
+  // ===== 取消面试（两段式确认） =====
+  const armTimer = useRef<number | null>(null);
+  const startArmCancel = () => {
+    setArmCancel(true);
+    if (armTimer.current) window.clearTimeout(armTimer.current);
+    armTimer.current = window.setTimeout(() => setArmCancel(false), 5000);
+  };
+  const doCancel = async () => {
+    if (!detail) return;
+    setBusy(true);
+    try {
+      await api.interviews.cancel(detail.id);
+      toast("面试已取消");
+      setDetail(null); setArmCancel(false);
+      loadCalendar();
+    } catch (e) { toast(errDetail(e), "err"); }
+    finally { setBusy(false); setArmCancel(false); }
   };
 
   // ===== 月历网格 =====
@@ -337,7 +381,7 @@ export default function Interviews() {
       )}
 
       {/* 面试详情弹窗 */}
-      <Modal open={!!detail} onClose={() => setDetail(null)} title="面试详情" width="max-w-lg">
+      <Modal open={!!detail} onClose={() => { setDetail(null); setArmCancel(false); }} title="面试详情" width="max-w-lg">
         {detail && (
           <div className="space-y-4">
             <div className="flex items-center gap-3">
@@ -390,11 +434,32 @@ export default function Interviews() {
               <p className="text-xs text-slate-300">暂无 AI 评审摘要</p>
             )}
 
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" onClick={() => setDetail(null)}>关闭</Button>
-              <Button variant="outline" onClick={() => openFeedback(detail)}>
-                <MessageSquareQuote size={13} /> 提交面试反馈
-              </Button>
+            <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-100 pt-3 mt-1">
+              {detail.status === "cancelled" ? (
+                <>
+                  <span className="text-xs text-rose-400 font-medium mr-auto">该面试已取消</span>
+                  <Button variant="ghost" onClick={() => setDetail(null)}>关闭</Button>
+                </>
+              ) : (
+                <>
+                  <Button variant="ghost" onClick={() => setDetail(null)}>关闭</Button>
+                  <Button variant="outline" onClick={() => openFeedback(detail)}>
+                    <MessageSquareQuote size={13} /> 提交面试反馈
+                  </Button>
+                  {canCancel(detail.status) &&
+                    (armCancel ? (
+                      <span className="flex items-center gap-2">
+                        <span className="text-xs text-rose-500 font-medium">确认取消该面试？</span>
+                        <Button variant="danger" loading={busy} onClick={doCancel}>确认取消</Button>
+                        <Button variant="ghost" onClick={() => setArmCancel(false)}>返回</Button>
+                      </span>
+                    ) : (
+                      <Button variant="danger" className="!px-3" onClick={startArmCancel}>
+                        <XCircle size={14} /> 取消面试
+                      </Button>
+                    ))}
+                </>
+              )}
             </div>
           </div>
         )}

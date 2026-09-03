@@ -149,6 +149,7 @@ export const api = {
     confirmSlot: (data: Record<string, unknown>) =>
       http.post<Interview>("/api/interviews/confirm-slot", data),
     feedback: (data: Record<string, unknown>) => http.post("/api/interviews/feedback", data),
+    cancel: (id: number) => http.post(`/api/interviews/${id}/cancel`),
     byCandidate: (cid: number) => http.get<Interview[]>(`/api/interviews/candidate/${cid}`),
     calendar: (params: { start: string; end: string; candidate_id?: number }) =>
       http.get<CalendarInterviewResponse>("/api/interviews/calendar", { params }),

@@ -12,6 +12,10 @@ from app.models import Candidate, Interview, InterviewStatus
 from app.config import settings
 from datetime import date, time, datetime
 
+# 可被 HR 主动取消的面试状态（cancel_interview 使用）
+CANCELLABLE_STATUSES = {"pending", "awaiting_confirm", "confirmed", "rescheduling"}
+
+
 class InterviewScheduler:
     """面试排期引擎 — 支持依赖注入"""
 
@@ -284,6 +288,55 @@ class InterviewScheduler:
 
         await db.flush()
         return {"status": "ok", "interview_id": interview_id}
+
+    async def cancel_interview(self, interview_id: int, db: AsyncSession) -> dict:
+        """取消面试（HR 侧操作）
+
+        可取消状态：pending / awaiting_confirm / confirmed / rescheduling。
+        已完成 / 已取消 / 未出席 不可取消。取消后保留确认时间，便于在日历上
+        以「已取消」样式回看；候选人若因本条面试处于 scheduled 且无其他活跃
+        面试，则回退为 analyzed，等待再次安排。
+        """
+        result = await db.execute(
+            select(Interview).where(Interview.id == interview_id)
+        )
+        interview = result.scalar_one_or_none()
+        if not interview:
+            raise ValueError(f"面试记录不存在: {interview_id}")
+
+        if interview.status == InterviewStatus.CANCELLED.value:
+            raise ValueError("该面试已取消")
+        if interview.status in (InterviewStatus.COMPLETED.value, InterviewStatus.NO_SHOW.value):
+            raise ValueError("已完成或未出席的面试不可取消")
+        if interview.status not in CANCELLABLE_STATUSES:
+            raise ValueError(f"当前状态（{interview.status}）不支持取消")
+
+        interview.status = InterviewStatus.CANCELLED.value
+
+        # 候选人联动：仅当候选人因本条面试处于 scheduled 且无其他活跃面试时回退
+        cand_result = await db.execute(
+            select(Candidate).where(Candidate.id == interview.candidate_id)
+        )
+        candidate = cand_result.scalar_one_or_none()
+        if candidate and candidate.status == "scheduled":
+            active = await db.execute(
+                select(Interview.id)
+                .where(
+                    Interview.candidate_id == candidate.id,
+                    Interview.id != interview_id,
+                    Interview.status.in_(CANCELLABLE_STATUSES),
+                )
+                .limit(1)
+            )
+            if active.first() is None:
+                candidate.status = "analyzed"
+
+        await db.flush()
+        return {
+            "status": "ok",
+            "interview_id": interview_id,
+            "new_status": InterviewStatus.CANCELLED.value,
+        }
 
     def check_conflicts(self, proposed_slots: list,
                         existing_interviews: list) -> list:
