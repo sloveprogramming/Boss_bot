@@ -15,6 +15,7 @@ class ExamAnalysis(Base):
     # 考生信息
     candidate_name = Column(String(100), nullable=False, index=True, comment="考生姓名")
     candidate_phone = Column(String(20), nullable=True, comment="考生手机号")
+    candidate_position = Column(String(100), nullable=True, comment="面试岗位(Workmenul采集)")
 
     # 考试信息
     exam_title = Column(String(200), nullable=False, comment="考试名称")

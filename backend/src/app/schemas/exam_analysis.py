@@ -9,12 +9,15 @@ class ExamAnalysisResponse(BaseModel):
     id: int
     candidate_name: str
     candidate_phone: Optional[str] = None
+    candidate_position: Optional[str] = None
+    external_id: Optional[str] = None
     exam_title: str
     exam_score: Optional[float] = None
     exam_total: Optional[float] = None
     exam_duration: Optional[int] = None
     analysis_status: str
     analysis_result: Optional[Any] = None
+    raw_data: Optional[Any] = None
     error_message: Optional[str] = None
     created_at: datetime
     analyzed_at: Optional[datetime] = None
@@ -36,6 +39,7 @@ class ExamImportRequest(BaseModel):
     candidate_name: str
     exam_title: str
     candidate_phone: Optional[str] = None
+    candidate_position: Optional[str] = None
     exam_score: Optional[float] = None
     exam_total: Optional[float] = None
     exam_duration: Optional[int] = None   # 分钟

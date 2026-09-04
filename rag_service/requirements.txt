@@ -11,6 +11,9 @@ pydantic-settings>=2.14.0
 # ===== ??? =====
 sqlalchemy>=2.0.51
 aiosqlite>=0.22.0
+aiomysql>=0.3.0            # 与主 Backend 共享 MySQL（rag_service 读写 policy_documents 等表）
+pymysql>=1.1.0             # aiomysql 底层依赖
+python-multipart>=0.0.32   # /upload 端点 Form 数据依赖
 
 # ===== LLM / RAG =====
 openai>=2.45.0

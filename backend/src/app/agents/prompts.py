@@ -2,7 +2,7 @@
 
 # 提示词版本号 — 每次修改任何 SYSTEM/PROMPT 后必须 +1，
 # 并随评分结果一起落库（match_analysis.prompt_version），否则数据反馈无从对比
-PROMPT_VERSION = "v3-20260903"  # v3: 新增 11 个在招岗位的专项评分标准（POSITION_STANDARDS）
+PROMPT_VERSION = "v4-20260904"  # v4: 新增 RESUME_BASIC_PREVIEW 轻量基本信息提取提示词；v3 为 11 个在招岗位专项评分标准（POSITION_STANDARDS）
 
 # ========== 简历分析相关 ==========
 
@@ -478,3 +478,37 @@ SUPERVISOR_DECISION_PROMPT = """综合以下三个维度的评审，做出最终
 - 两个 pass + 一个 pending → pass（带 risk_warning）
 - 一个 reject → pending（除非另两个都很强才 pass）
 - 两个 reject → reject"""
+
+
+# ========== 简历基本信息轻量识别（新建候选人预填用，不做评估） ==========
+
+RESUME_BASIC_PREVIEW_SYSTEM = """你是一位简历信息提取助手。你的任务是从简历文本中只提取候选人的基本联系信息与求职意向，供 HR 新建候选人时自动预填表单。
+
+只提取，不评估，不编造：
+- 简历里没有的字段一律填空 / null / []，绝不猜测。
+- 不输出评分、不写评价、不分析优劣势。"""
+
+RESUME_BASIC_PREVIEW_PROMPT = """请从以下简历文本中提取基本信息，并输出 JSON：
+
+简历文本：
+```
+{resume_text}
+```
+
+输出 JSON（不要包含其他文字）：
+```json
+{{
+    "name": "姓名（没有则空字符串）",
+    "phone": "手机号/联系电话（没有则空字符串）",
+    "email": "邮箱（没有则空字符串）",
+    "location": "现居地/所在地（没有则空字符串）",
+    "experience_years": "工作年限：按简历中明确标注的工作起始年月计算出的数字（年），无法可靠判断则为 null",
+    "suggested_position": "应聘岗位：优先取简历'求职意向/期望岗位/应聘职位'，其次取最近一份工作的职位；都没有则空字符串",
+    "skills": ["技能最多取10个，按简历罗列的技术栈/工具/能力"]
+}}
+```
+
+注意：
+- phone 仅保留纯数字与常用分隔符；email 需是标准邮箱格式；识别不了就空字符串。
+- experience_years 只依据简历写明的任职时间段推算；简历没写具体年月时一律 null，不要瞎估。
+- suggested_position 要精炼成岗位名（如'采购主管'），不要带公司名或长句。"""

@@ -38,6 +38,18 @@ class SlotConfirm(BaseModel):
     meeting_link: Optional[str] = None  # 会议链接
 
 
+class ManualScheduleRequest(BaseModel):
+    """手动指定面试时间请求体（HR 直接定时间，不依赖 AI 生成时段）"""
+    candidate_id: int                              # 候选人ID
+    interviewers: List[str] = ["面试官"]            # 面试官列表
+    round: str = "first"                           # 面试轮次
+    date: str                                      # 面试日期 "2025-01-15"
+    start_time: str                                # 开始时间 "14:00"
+    end_time: str                                  # 结束时间 "15:00"
+    location: Optional[str] = None                 # 面试地点
+    meeting_link: Optional[str] = None             # 会议链接
+
+
 class InterviewResponse(BaseModel):
     """面试信息的响应体"""
     id: int

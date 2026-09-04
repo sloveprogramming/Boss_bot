@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { CheckCircle2, AlertCircle, Loader2, X } from "lucide-react";
 
 // ================= Toast =================
@@ -121,17 +122,20 @@ export function Modal({ open, onClose, title, width = "max-w-lg", children }: {
   open: boolean; onClose: () => void; title: string; width?: string; children: ReactNode;
 }) {
   if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-slate-950/45 backdrop-blur-sm animate-[fadeIn_.2s_ease-out]" onClick={onClose} />
-      <div className={`relative bg-white/90 backdrop-blur-2xl border border-white/80 rounded-2xl shadow-pop w-full ${width} max-h-[88vh] overflow-y-auto animate-[modalIn_.3s_cubic-bezier(.22,.8,.3,1)]`}>
+  return createPortal(
+    <div className="fixed inset-0 z-[90] overflow-y-auto">
+      <div className="fixed inset-0 bg-slate-900/10 backdrop-blur-md animate-[fadeIn_.2s_ease-out]" onClick={onClose} />
+      <div className="min-h-full flex items-center justify-center p-4">
+      <div className={`relative bg-white/90 backdrop-blur-2xl border border-white/80 rounded-2xl shadow-pop w-full ${width} max-h-[calc(100vh-2rem)] overflow-y-auto my-auto animate-[modalIn_.3s_cubic-bezier(.22,.8,.3,1)]`}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 sticky top-0 bg-white/85 backdrop-blur-xl rounded-t-2xl z-10">
           <h3 className="font-semibold font-display text-slate-900">{title}</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors"><X size={18} /></button>
         </div>
         <div className="p-5">{children}</div>
       </div>
-    </div>
+      </div>
+    </div>,
+    document.body
   );
 }
 
@@ -168,9 +172,9 @@ export function Drawer({ open, onClose, title, width = "max-w-md", children }: {
   }, [open, onClose]);
 
   if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="absolute inset-0 bg-slate-950/40 backdrop-blur-sm animate-[fadeIn_.2s_ease-out]" onClick={onClose} />
+  return createPortal(
+    <div className="fixed inset-0 z-[90] flex justify-end">
+      <div className="absolute inset-0 bg-slate-900/10 backdrop-blur-md animate-[fadeIn_.2s_ease-out]" onClick={onClose} />
       <aside
         role="dialog"
         aria-modal="true"
@@ -184,6 +188,7 @@ export function Drawer({ open, onClose, title, width = "max-w-md", children }: {
         </div>
         <div className="flex-1 overflow-y-auto px-5 py-5">{children}</div>
       </aside>
-    </div>
+    </div>,
+    document.body
   );
 }

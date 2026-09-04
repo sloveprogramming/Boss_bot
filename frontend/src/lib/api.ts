@@ -1,9 +1,10 @@
 import axios from "axios";
 import type {
-  Candidate, Page, ResumeAnalysis, ResumeUploadResponse, DashboardStats,
-  Questionnaire, Interview, InterviewSlotResponse, TalentPoolItem,
+  Candidate, Page, ResumeAnalysis, ResumeUploadResponse, ResumeBasicPreview, ResumeQuickAddResponse,
+  DashboardStats, Questionnaire, Interview, InterviewSlotResponse, TalentPoolItem,
   PipelineOverview, ExamAnalysisItem, CalendarInterviewResponse,
   QuestionnaireOverviewItem, ScoringInsights, ScoringIteration, User,
+  PolicyChatSession, PolicyChatMessage,
 } from "../types";
 
 export const TOKEN_KEY = "recruit_token";
@@ -54,13 +55,17 @@ export const errDetail = (e: unknown): string => {
 // ===== RAG 服务（独立 :18003） =====
 const RAG_BASE = import.meta.env.VITE_RAG_BASE || "/rag-api";
 
+/** 把主后端风格 /api/... 映射为 RAG 公网路径（/rag-api/...），与 postSSE 保持一致 */
+export const ragUrl = (apiPath: string): string =>
+  apiPath.startsWith("/api/") ? RAG_BASE + apiPath.slice(4) : apiPath;
+
 /** POST SSE 流式请求，逐块回调；返回完整文本 */
 export async function postSSE(
   url: string,
   body: Record<string, unknown>,
   onDelta: (text: string) => void,
 ): Promise<string> {
-  const full = url.startsWith("/api/") ? RAG_BASE + url.slice(4) : url; // /api/chat/... → RAG 服务
+  const full = ragUrl(url); // /api/chat/... → RAG 服务
   const res = await fetch(full, {
     method: "POST",
     headers: {
@@ -87,7 +92,7 @@ export async function postSSE(
       try {
         const j = JSON.parse(payload);
         // 兼容多种字段：answer / delta / content / token
-        const delta = j.answer ?? j.delta ?? j.content ?? j.token ?? "";
+        const delta = j.text ?? j.answer ?? j.delta ?? j.content ?? j.token ?? "";
         if (delta) { answer += delta; onDelta(answer); }
         if (j.sources) onDelta(answer); // 触发重绘
       } catch { /* 非 JSON 心跳忽略 */ }
@@ -129,6 +134,22 @@ export const api = {
     },
     getByCandidate: (cid: number) =>
       http.get<ResumeAnalysis>(`/api/resumes/candidate/${cid}`),
+    preview: (file: File) => {
+      const fd = new FormData();
+      fd.append("file", file);
+      return http.post<ResumeBasicPreview>("/api/resumes/preview", fd);
+    },
+    quickAdd: (p: {
+      file: File; name?: string; position?: string; phone?: string; email?: string;
+      source?: string; experience_years?: number | null; job_description?: string;
+    }) => {
+      const fd = new FormData();
+      Object.entries({ ...p, file: undefined }).forEach(([k, v]) => {
+        if (v != null && v !== "") fd.append(k, String(v));
+      });
+      fd.append("file", p.file);
+      return http.post<ResumeQuickAddResponse>("/api/resumes/quick-add", fd);
+    },
   },
 
   workflow: {
@@ -148,6 +169,10 @@ export const api = {
       http.post<InterviewSlotResponse>("/api/interviews/generate-slots", data),
     confirmSlot: (data: Record<string, unknown>) =>
       http.post<Interview>("/api/interviews/confirm-slot", data),
+    manual: (data: {
+      candidate_id: number; date: string; start_time: string; end_time: string;
+      interviewers?: string[]; round?: string; location?: string; meeting_link?: string;
+    }) => http.post<Interview>("/api/interviews/manual", data),
     feedback: (data: Record<string, unknown>) => http.post("/api/interviews/feedback", data),
     cancel: (id: number) => http.post(`/api/interviews/${id}/cancel`),
     byCandidate: (cid: number) => http.get<Interview[]>(`/api/interviews/candidate/${cid}`),
@@ -174,11 +199,27 @@ export const api = {
     list: () => http.get("/api/policy/documents"),
     remove: (id: number) => http.delete(`/api/policy/documents/${id}`),
   },
-  ragChatStream: "/api/chat/stream",
+  rag: {
+    stream: "/api/chat/stream", // 仅给 postSSE 映射 RAG 服务；历史改由主后端 policyChat 持久化
+  },
+  policyChat: {
+    sessions: () => http.get<{ sessions: PolicyChatSession[] }>("/api/policy/sessions"),
+    history: (sid: string) =>
+      http.get<{ session_id: string; messages: PolicyChatMessage[] }>(
+        `/api/policy/history?session_id=${encodeURIComponent(sid)}`),
+    addMessage: (data: { session_id: string; role: "user" | "assistant"; content: string }) =>
+      http.post<{ id: number }>("/api/policy/messages", data),
+    removeSession: (sid: string) =>
+      http.delete<{ deleted: number }>(`/api/policy/sessions/${encodeURIComponent(sid)}`),
+  },
 
   exam: {
     list: (params: { page?: number; page_size?: number }) =>
       http.get<Page<ExamAnalysisItem>>("/api/exam-analysis", { params }),
+    sync: () =>
+      http.post<{ checked: number; imported: number; updated: number; skipped: number }>("/api/exam-analysis/sync"),
+    downloadReport: (id: number) =>
+      http.get<Blob>(`/api/exam-analysis/${id}/download-report`, { responseType: "blob" }),
   },
 
   scoring: {

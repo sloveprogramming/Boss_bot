@@ -250,6 +250,56 @@ class InterviewScheduler:
 
         return interview
 
+    async def schedule_manual(
+        self,
+        candidate_id: int,
+        interviewers: List[str],
+        round_name: str,
+        date: str,
+        start_time: str,
+        end_time: str,
+        location: Optional[str],
+        meeting_link: Optional[str],
+        db: AsyncSession,
+    ) -> Interview:
+        """HR 手动指定时间直接排期（不依赖 AI 生成的候选时段）
+
+        建一条 pending 面试记录后立即按指定时间确认，等价于
+        generate_slots + confirm_slot，但时间完全由 HR 自定义；
+        时长按起止时间自动折算（供日历日程与展示使用）。
+        """
+        cand_result = await db.execute(
+            select(Candidate).where(Candidate.id == candidate_id)
+        )
+        candidate = cand_result.scalar_one_or_none()
+        if not candidate:
+            raise ValueError(f"候选人不存在: {candidate_id}")
+
+        start_dt = datetime.fromisoformat(f"{date}T{start_time}")
+        end_dt = datetime.fromisoformat(f"{date}T{end_time}")
+        if end_dt <= start_dt:
+            raise ValueError("结束时间必须晚于开始时间")
+        duration_minutes = max(1, int((end_dt - start_dt).total_seconds() // 60))
+
+        interview = Interview(
+            candidate_id=candidate_id,
+            round=round_name,
+            status=InterviewStatus.PENDING.value,
+            interviewers=interviewers,
+            duration_minutes=duration_minutes,
+        )
+        db.add(interview)
+        await db.flush()
+
+        # 复用 confirm_slot：置为已确认、更新候选人状态、尽力创建日历日程
+        return await self.confirm_slot(
+            interview_id=interview.id,
+            selected_slot={"date": date, "start_time": start_time, "end_time": end_time},
+            location=location,
+            meeting_link=meeting_link,
+            db=db,
+        )
+
     async def submit_feedback(self, interview_id: int, feedback: dict,
                               db: AsyncSession) -> dict:
         """提交面试反馈并更新候选人状态

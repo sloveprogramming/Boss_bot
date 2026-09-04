@@ -1,377 +1,322 @@
-﻿# 智聘云（Boss_bot）— AI 智能招聘助手
+# 智聘云（Boss_bot）— AI 智能招聘助手
 
-一个覆盖「简历解析 → 智能分析 → 自动分流 → 问卷/面试 → 录用决策」全流程的 AI 招聘系统。
-后端用 **FastAPI + LangGraph** 把招聘流程编排成状态机，LLM（OpenAI 兼容接口，如 DeepSeek）负责
-简历分析、面试评审、自然语言问答；另有一个独立的 **RAG 服务** 做企业制度知识库问答；
-前端为 **React + TypeScript + Vite + Tailwind** 的单页应用。
+> 简历解析 → AI 画像 → 自动分流 → 问卷/面试 → 录用决策的**全流程 AI 招聘系统**。
+> 前端为 React SPA，后端为 FastAPI + LangGraph 状态机编排；LLM 走 OpenAI 兼容接口（DeepSeek / 通义千问等）；另附独立 **RAG 服务** 做企业制度问答。
 
-> 本文档基于对代码的实际审核编写，描述的是当前代码的真实结构与行为。
+<div align="center">
+
+![Python](https://img.shields.io/badge/Python-3.11-blue)
+![FastAPI](https://img.shields.io/badge/FastAPI-LangGraph-green)
+![React](https://img.shields.io/badge/React-18+TS-blue)
+![LLM](https://img.shields.io/badge/LLM-OpenAI%20Compatible-orange)
+![MySQL](https://img.shields.io/badge/DB-MySQL%2FSQLite-9cf)
+
+</div>
 
 ---
 
-## 1. 核心能力
+## 目录
 
-| 能力 | 说明 |
+- [核心功能](#核心功能)
+- [系统架构](#系统架构)
+- [技术栈](#技术栈)
+- [目录结构](#目录结构)
+- [快速开始](#快速开始)
+- [环境变量](#环境变量)
+- [API 一览](#api-一览)
+- [测试](#测试)
+- [部署建议](#部署建议)
+- [已知限制](#已知限制)
+
+---
+
+## 核心功能
+
+| 模块 | 说明 |
 |------|------|
-| 简历解析 | 支持 PDF / Word / TXT / 图片；扫描件 PDF 自动走 OCR（PaddleOCR） |
-| AI 智能分析 | 基本信息 / 技能 / 经验 **3 路并行分析** + 综合加权打分（技能 40% + 经验 40% + 稳定性 20%） |
-| 自动分流 | 按匹配分阈值（默认 80 / 60 / 40）自动路由：直接面试 / 问卷 / 人才池 / 结束 |
-| 面试排期 | 基于约束自动生成 3 个可选时间段，候选人确认后落库，可选钉钉日历集成 |
-| 面试评审 | 面试后 **3 路并行评审**（技术 / 沟通 / 文化）+ Supervisor 综合决策 |
-| 制度问答 RAG | 文档上传 → 向量化（BGE-M3）→ Milvus 混合检索 → CrossEncoder 重排 → LLM 回答（SSE 流式） |
-| 自然语言查询 | Function Calling + MCP 工具：用中文直接查候选人 / 面试 / 数据，甚至发邮件 |
-| 通知 | 邮件模板（问卷 / 面试 / 提醒 / 拒信 / Offer），多渠道预留 |
-| 可观测性 | 每次 LLM 调用自动记录：输入输出、Token 估算、延迟，可查询聚合统计 |
-| 高并发防护 | 简历分析任务可入 RabbitMQ 队列（有界并发 + 死信 + 重试），不可用时自动降级为内联同步 |
+| 候选人管理 | 候选人 CRUD、批量流程入口、人才池、自然语言查询（Function Calling） |
+| 简历解析 | PDF / Word / TXT / 图片；扫描件 PDF 自动渲染后走 **PaddleOCR** 识别 |
+| AI 智能分析 | 基本信息 / 技能 / 经验 **3 路并行分析**（LangGraph `Send`），维度分落库、按权重加权出总分 |
+| 自动分流 | 按匹配分阈值（默认 80 / 60 / 40）路由：快速面试 / 问卷通道 / 人才池 / 结束 |
+| 面试管理 | **月视图日历**展示排期，支持按候选人过滤；AI 生成可选时段、候选人确认、提交反馈、**一键取消面试** |
+| 面试评审 | 面试完成后 3 路并行评审（技术 / 沟通 / 文化）→ Supervisor 综合决策 → 结果联动候选人状态 |
+| 问卷管理 | **全量总览**发送/完成情况，支持姓名/手机搜索与状态筛选；向候选人发送问卷链接 |
+| 评分优化 | 用真实面试结果（回标 + 面试官反馈）计算通过率与各维度区分度，**给出简历评分权重调整建议**，可应用并记录迭代历史 |
+| 制度问答 RAG | 文档上传 → 向量化 → Milvus 检索 → CrossEncoder 重排 → LLM 流式回答（SSE），带引用来源 |
+| 通知 | 邮件通知模板（问卷 / 面试 / 提醒 / 拒信 / Offer），可选钉钉日历集成 |
+| 高并发防护 | 简历分析任务可入 **RabbitMQ 队列**（有界并发 + 死信 + 指数退避重试），不可用时自动降级为内联同步 |
+| 可观测性 | 后端自动记录每次 LLM 调用（输入输出 / Token / 延迟），可查询聚合统计（`/api/llm`） |
+
+> 已上线页面：**仪表盘 · 候选人 · 招聘管道 · 面试管理（月历） · 问卷管理（总览） · 制度问答 · 试卷分析 · 评分优化**。
 
 ---
 
-## 2. 技术栈
+## 系统架构
 
-- **后端**：Python 3.11 / FastAPI / Uvicorn / SQLAlchemy 2.0（async）/ Pydantic v2
-- **工作流**：LangGraph（StateGraph + 条件边 + Send 并行分支）
-- **LLM**：OpenAI 兼容接口（`openai` SDK），DeepSeek 等可替换
-- **AI 协议**：MCP SDK（5 个工具：候选人查询 / 详情 / 面试 / 仪表盘统计 / 发邮件）
-- **队列**：aio-pika（RabbitMQ），durable 队列 + 死信 + TTL 重试
-- **RAG**：pymilvus / Milvus 2.4 / BGE-M3 混合检索 / sentence-transformers 重排 / Redis 语义缓存
-- **数据**：MySQL（生产，`aiomysql`）；SQLite（开发/Docker，`aiosqlite`）
-- **前端**：React 18 / TypeScript / Vite / Tailwind CSS / recharts
-- **认证**：JWT（python-jose）+ bcrypt；RBAC 角色：admin / hr / interviewer / candidate
-- **其他**：PyMuPDF（PDF）、python-docx、PaddleOCR（扫描件 OCR）、Dify（考试分析，可选）、httpx
-
----
-
-## 3. 系统架构
-
-### 3.1 运行时服务
+### 运行时服务
 
 | 服务 | 端口 | 入口 | 说明 |
 |------|------|------|------|
-| Backend（主后端） | 18000 | `backend/src/app/main.py` | API + LangGraph 招聘工作流 + MQ 发布/消费 + 定时任务 |
-| RAG Service | 18003 | `rag_service/src/app/main.py` | 企业制度文档索引 + 混合检索问答（SSE） |
-| Frontend | 18016 | `frontend/`（Vite dev） | React SPA，`/api` 由 Vite 代理到 18000 |
-| Backend Worker（可选） | - | `python -m app.queue.worker` | 独立消费简历分析任务队列 |
-| 基础设施（可选） | - | docker-compose | MySQL / Milvus+MinIO / Redis / RabbitMQ |
+| Backend（主后端） | `18000` | `backend/src/app/main.py` | FastAPI API + LangGraph 工作流 + 任务队列 + 定时任务 |
+| RAG Service | `18003` | `rag_service/src/app/main.py` | 企业制度文档索引与智能问答（SSE 流式） |
+| Frontend（开发态） | `18016` | `frontend/`（Vite） | React SPA，`/api`、`/rag-api` 由 Vite 代理转发 |
+| MySQL / 消息队列 / 向量库 | 见 docker-compose | 容器 | mysql / rabbitmq / milvus + minio / redis 均为可独立启停的基础设施 |
 
-### 3.2 服务拓扑
+### 服务拓扑
 
 ```mermaid
 flowchart LR
-    U[用户浏览器] --> F[Frontend :18016]
+    U[浏览器] --> F[Frontend :18016]
     F -->|"/api 代理"| B[Backend :18000]
-    F -->|SSE| B
+    F -->|"/rag-api 代理"| R[RAG Service :18003]
     B --> W[LangGraph 招聘工作流]
-    B --> Q[(RabbitMQ 任务队列)]
-    Q --> WK[Backend Worker]
+    B --> Q[(RabbitMQ)]
+    Q --> WK[backend-worker]
     WK --> W
-    B --> DB[(MySQL / SQLite)]
-    W --> N[通知服务: 邮件/钉钉日历]
-    B --> MCP[MCP Tools: 查库/发邮件]
-    F --> RAG[RAG Service :18003]
-    RAG --> MV[(Milvus 向量库)]
-    RAG --> RC[(Redis 语义缓存)]
-    RAG --> DB
+    B <--> DB[(MySQL)]
+    W --> N[通知 / 日历]
+    W --> M[MCP 工具: 查库/发邮件]
+    R --> MV[(Milvus)]
+    R --> DB
 ```
 
-### 3.3 一次简历的完整数据流
+### 一次简历的完整数据流
 
 ```
 HR 创建候选人 / 上传简历
-  → /api/resumes/upload       解析文件为纯文本（PDF/DOCX/TXT/OCR）
-  → /api/resumes/{id}/analyze 或 /api/workflow/start/{id}
-  → LangGraph:
-      parse_resume → classify(16 类关键词+LLM兜底)
-      → 3 路并行分析(basic/skills/experience) → synthesize(加权算分)
-      → 按 match_score 分流
-          ≥80 → 面试排期    60~79 → 问卷(固定链接) → 通过→面试
-          40~59 → 人才池     <40 → 结束
+  → POST /api/resumes/upload              解析文件为纯文本（PDF/DOCX/TXT/OCR）
+  → POST /api/workflow/start/{cid}        进入 LangGraph
+      parse_resume → classify（岗位关键词 + LLM 兜底）
+      → 3 路并行分析（basic/skills/experience）→ synthesize（按权重加权出 match_score）
+      → 按阈值自动分流
+          ≥80  → 面试排期     60~79 → 问卷（链接）→ 通过后进入面试
+          40~59 → 人才池      <40   → 流程结束
   → schedule_interview → confirm → complete
-  → 3 路并行评审(技术/沟通/文化) → supervisor_decision(录用/拒绝 + 邮件通知)
-  → 状态与结果写回 candidates / resumes / interviews 等表
+  → 3 路并行评审（技术/沟通/文化）→ supervisor_decision（录用/拒绝，联动候选人状态）
+  → 结果写回 candidates / resumes / interviews / talent_pool 等表
 ```
 
 ---
 
-## 4. 目录结构
+## 技术栈
 
-```
+- **后端**：Python 3.11 / FastAPI / Uvicorn / SQLAlchemy 2.0（async）/ Pydantic v2
+- **工作流**：LangGraph（StateGraph + 条件边 + `Send` 并行分支）
+- **LLM**：OpenAI 兼容 SDK（DeepSeek、通义千问等，`OPENAI_BASE_URL` / `OPENAI_MODEL` 可配）
+- **AI 工具协议**：MCP Server（stdio）+ 内联 Client（查库 / 发邮件）
+- **队列**：aio-pika / RabbitMQ（durable + DLX + TTL 退避重试，自动降级内联）
+- **RAG**：Milvus 2.4 / pymilvus / 向量化（Embedding 可配）+ CrossEncoder 重排 / Redis 语义缓存
+- **数据**：MySQL（`aiomysql`，默认）/ SQLite（`aiosqlite`，可切换开发）
+- **前端**：React 18 / TypeScript / Vite / Tailwind CSS / recharts / lucide-react
+- **认证**：JWT（python-jose）+ bcrypt；RBAC 角色 admin / hr / interviewer
+- **其他**：PyMuPDF、python-docx、PaddleOCR（扫描件 OCR）、Dify（试卷分析，可选）
+
+---
+
+## 目录结构
+
+```text
 Boss_bot/
-├── .env.example                 # 环境变量模板（唯一配置源，复制为 .env）
-├── docker-compose.yml           # 一键部署：backend + rag + milvus + minio + rabbitmq + worker
-├── Dockerfile.backend           # Backend 镜像（uvicorn app.main:app --app-dir src，监听 8000）
-├── Dockerfile.rag               # RAG 镜像（uvicorn app.main:app --app-dir src，监听 18003）
-├── start_all.py                 # 本地开发一键启动（backend + frontend + rag）
-├── seed_admin.py                # 初始化管理员脚本（自动定位 backend/src）
-├── requirements-dev.txt         # 开发/测试依赖（pytest 等）
-├── pyrightconfig.json           # 类型检查配置（extraPaths 指向 backend/src、rag_service/src）
+├── .env.example                 # 环境变量模板（复制为 .env 并填入真实值）
+├── docker-compose.yml           # 一键部署基础设施与应用容器
+├── Dockerfile.backend           # Backend 镜像（uvicorn app.main:app --app-dir src，容器内 8000）
+├── Dockerfile.rag               # RAG 镜像（uvicorn app.main:app --app-dir src，容器内 18003）
+├── start_all.py                 # 本地一键启动（Backend + Frontend，可选 RAG）
+├── seed_admin.py                # 创建首个管理员脚本
 │
-├── backend/                     # 主后端（Maven 式模块：src + pyproject.toml）
-│   ├── pyproject.toml           # ≈ pom.xml：依赖声明、构建配置、pytest（pythonpath=src）
-│   ├── requirements.txt         # 独立依赖清单（pip install -r 用，与 pyproject 保持一致）
-│   ├── alembic.ini / migrations/# Alembic 迁移（env.py 已指向 src）
-│   ├── src/app/                 # ≈ src/main：应用包（入口 app.main:app）
-│   │   ├── main.py              # FastAPI 入口：lifespan、CORS、全局异常处理、路由注册
-│   │   ├── config.py            # Pydantic Settings（自动向上查找根 .env）
-│   │   ├── database.py          # SQLAlchemy 异步引擎 / get_db / init_db(create_all)
-│   │   ├── dependencies/        # auth：bcrypt 哈希、JWT、get_current_user、require_role
-│   │   ├── models/              # 11 张 ORM 表（candidate/resume/interview/...）
-│   │   ├── schemas/             # Pydantic 请求/响应模型
-│   │   ├── routers/             # 10 个 API 模块（见 §9）
-│   │   ├── agents/              # LLM 层：llm_client / prompts / tracing
-│   │   ├── workflow/            # LangGraph 编排：state / graph / nodes/（9 类节点）
-│   │   ├── mcp/                 # MCP Server(stdio) + 内联 Client + tools(database/email)
-│   │   ├── queue/               # RabbitMQ broker + worker（可降级）
-│   │   ├── services/            # 简历分析/排期/通知/日历/问卷/考试分析/定时任务/Milvus索引
-│   │   └── utils/               # SSE 事件工具
-│   └── tests/                   # ≈ src/test：镜像 src 结构（routers / workflow / llm_client）
+├── backend/                     # 主后端（Maven 式：src + pyproject.toml + tests）
+│   ├── pyproject.toml / requirements.txt
+│   ├── tests/                   # pytest：routers / workflow / scoring / resume_analyzer / llm_client
+│   └── src/app/
+│       ├── main.py              # FastAPI 入口：lifespan、CORS、路由注册、全局异常
+│       ├── config.py            # Pydantic Settings（自动向上查找根目录 .env）
+│       ├── database.py          # 异步引擎 / get_db / init_db（create_all 建表）
+│       ├── dependencies/        # 认证：bcrypt 哈希、JWT、get_current_user、require_role
+│       ├── models/              # 14 张表 ORM（candidate/resume/questionnaire/interview/policy/...）
+│       ├── schemas/             # Pydantic 请求/响应模型
+│       ├── routers/             # auth / candidates / resumes / questionnaires / interviews /
+│       │                        # workflow / dashboard / policy / exam-analysis / llm / scoring
+│       ├── agents/              # LLM 层：llm_client（chat / 流式）/ prompts / tracing
+│       ├── workflow/            # LangGraph：state / graph / scoring + nodes/（解析·分类·分析·问卷·面试·评审等节点）
+│       ├── mcp/                 # MCP Server（stdio）+ Client + tools（database / email）
+│       ├── queue/               # RabbitMQ broker / worker（有界并发 + 重试，可降级）
+│       ├── services/            # resume_analyzer / scheduler / questionnaire / notification /
+│       │                        # calendar_svc / exam_analysis_svc / scheduler_tasks / milvus_indexer ...
+│       └── utils/               # SSE 事件工具
 │
 ├── rag_service/                 # 独立 RAG 服务（Maven 式模块）
-│   ├── pyproject.toml           # ≈ pom.xml：依赖声明、构建配置、pytest（pythonpath=src）
-│   ├── requirements.txt         # 独立依赖清单
-│   ├── start.py                 # 本地启动脚本（uvicorn app.main:app --app-dir src）
-│   ├── src/app/                 # ≈ src/main：应用包（入口 app.main:app）
-│   │   ├── main.py / config.py / database.py
-│   │   ├── agents/              # llm_client / prompts
-│   │   ├── routers/             # chat(SSE) / documents
-│   │   ├── services/            # policy_rag(检索管线) / policy_text_splitter / semantic_cache
-│   │   └── models/              # policy 表
-│   └── tests/                   # ≈ src/test：policy_rag 管线测试
+│   ├── pyproject.toml / requirements.txt
+│   ├── start.py                 # uvicorn app.main:app --app-dir src --port 18003
+│   ├── tests/                   # policy_rag 管线测试
+│   └── src/app/
+│       ├── main.py / config.py / database.py
+│       ├── agents/              # llm_client / prompts
+│       ├── routers/             # chat（SSE）/ documents
+│       ├── services/            # policy_rag / text_splitter / semantic_cache
+│       └── models/              # policy 文档与对话历史表
 │
-└── frontend/                    # React SPA
+└── frontend/                    # React SPA（Vite dev :18016）
     └── src/
-        ├── App.tsx              # 路由表
-        ├── contexts/AuthContext.tsx  # 登录态/JWT 存取
-        ├── lib/api.ts           # 所有后端接口封装（含 SSE 解析）
-        ├── components/          # Layout / ProtectedRoute / Toast
-        └── pages/               # Login/Dashboard/Candidates/CandidateDetail/...
+        ├── App.tsx              # 路由表（/login、/scoring 等）
+        ├── contexts/AuthContext.tsx   # 登录态 / JWT
+        ├── lib/api.ts           # 全部接口封装 + SSE 解析
+        ├── components/          # Layout（侧边栏）、ProtectedRoute、Toast、ui
+        └── pages/               # Dashboard/Candidates/CandidateDetail/Interviews(月历)/
+                                 # Questionnaires(总览)/ScoringInsights/PolicyAgent/Pipeline/ExamAnalysis
 ```
 
-> **目录规范（Maven 式）**：每个服务模块都有独立的 `pyproject.toml`（≈ pom.xml）声明依赖与构建配置；源码统一放在 `src/`（≈ src/main），测试统一放在 `tests/`（≈ src/test）并镜像源码结构；根目录只保留跨服务共享的编排/部署文件（docker-compose、Dockerfile、start_all.py、.env）。
-
-
----
-
-## 5. 核心业务：LangGraph 招聘工作流
-
-### 5.1 状态对象 `workflow/state.py`
-
-`RecruitmentState`（TypedDict）贯穿整个流程，所有节点读写同一个 State，LangGraph 自动合并返回值。
-关键字段：候选人信息、`status`、`pipeline_stage`、`resume_text`、`job_category`、三路分析结果、
-`match_score`、问卷/面试状态、三路评审结果、Function Calling 字段、`errors`/`retry_count`。
-
-### 5.2 图定义 `workflow/graph.py`
-
-- 入口：`parse_resume`
-- 条件路由（`should_send_questionnaire`，阈值来自 `.env`）：
-  - `match_score >= 80` → `schedule_interview`（快速通道）
-  - `>= 60` → `generate_questionnaire`（问卷通道）
-  - `>= 40` → `move_to_talent_pool`（人才池）
-  - `< 40` → 结束
-- 面试完成 → `route_to_reviewers` 并行拆 3 路 → `supervisor_decision` → 结束
-
-### 5.3 并行分支（LangGraph `Send`）
-
-| 阶段 | 并行节点 | 汇合节点 |
-|------|----------|----------|
-| 简历分析 | `analyze_basic_info` / `analyze_skills` / `analyze_experience` | `synthesize_analysis`（加权算分） |
-| 面试评审 | `technical_review` / `communication_review` / `culture_review` | `supervisor_decision`（录用/拒绝） |
-
-### 5.4 降级机制
-
-`workflow/agent_client.py` 会优先调用独立的 Agent HTTP 服务（旧架构端口 18001~18008）；
-调用失败时节点内部自动回退到「内联 LLM 调用」（`agents/llm_client.py`），保证核心功能可用。
+> **目录规范（Maven 式）**：每个服务模块拥有独立 `pyproject.toml`（≈ pom.xml）声明依赖与构建配置；源码统一放 `src/`（≈ src/main），测试镜像源码结构放 `tests/`（≈ src/test）；根目录只保留跨服务共享的编排 / 部署文件。
 
 ---
 
-## 6. 模块详解
+## 快速开始
 
-### 6.1 认证与权限（`routers/auth.py` + `dependencies/auth.py`）
-
-- `POST /api/auth/setup`：仅当系统**没有任何管理员**时可用，用于创建首个管理员。
-- `POST /api/auth/register`：**仅管理员可调用**，只能创建 HR / interviewer 角色（避免公开注册被滥用）。
-- `POST /api/auth/login`：返回 JWT（`sub`=用户名，`role`=角色），过期时间默认 24h。
-- `GET /api/auth/me`、`POST /api/auth/change-password`。
-- 密码使用 **bcrypt 直接哈希**（不依赖 passlib）。
-- 权限控制：`require_role([...])` 依赖用于路由级 RBAC。
-
-### 6.2 LLM 客户端与可观测性（`agents/`）
-
-- `llm_client.py`：唯一 LLM 入口，三种模式：
-  - `chat()` — 同步等完整回复（结构化 JSON 分析等）
-  - `stream_chat()` — 逐 token 流式（SSE 打字机）
-  - `stream_chat_json()` — 流式但攒完整 JSON 后一次性返回
-- `tracing.py`：`@trace_llm_call` 装饰器自动把每次调用的输入/输出/延迟/Token 估算写入 `llm_logs` 表。
-- `prompts.py`：4 套提示词（简历分析 / 面试排期 / 制度问答 / 反馈摘要）及多 Agent 专用提示词。
-
-### 6.3 MCP 工具与 Function Calling（`mcp/` + `workflow/nodes/function_calling.py`）
-
-- 5 个工具：`query_candidates` / `get_candidate_detail` / `query_interviews` / `get_dashboard_stats` / `send_email`。
-- `mcp/server.py`：标准 stdio MCP Server，可被任意 MCP Client 连接。
-- `mcp/client.py`：提供「内联直连」执行（跳过协议开销），供 LangGraph Function Calling 节点使用。
-- 流程：用户自然语言 → LLM 选工具 → 逐个执行 → 结果回填 → 流式回复（`/api/workflow/function-call/stream`）。
-
-### 6.4 异步任务队列（`queue/`，高并发防护）
-
-- `publish_analysis_task()`：把「分析某候选人」发布到 durable 队列，返回 `task_id`。
-- worker（`python -m app.queue.worker`）有界并发消费（`prefetch_count` 默认 8）。
-- 可靠性：主队列带死信（DLX）+ retry 队列带 TTL（指数退避重试，默认 5 次）。
-- **自动降级**：未安装 aio-pika 或 RabbitMQ 不可达时抛 `BrokerUnavailable`，接口回退为内联同步执行。
-- 进度：写入 `task_progress` 表，前端轮询 `GET /api/workflow/task/{task_id}`。
-
-### 6.5 通知与日历（`services/`）
-
-- `notification.py`：模板化邮件（问卷邀请/催填、面试邀请/确认/提醒、拒信、Offer），支持自定义内容。
-- `calendar_svc.py`：钉钉日历事件创建（可选，需 `DINGTALK_APP_KEY/SECRET`）。
-- `notification` 记录统一写入 `notifications` 表。
-
-### 6.6 定时任务（`services/scheduler_tasks.py`）
-
-`main.py` lifespan 启动，每 300s 一轮：
-- 面试提醒：已确认且距开始约 24h 的面试，自动发送提醒邮件（`reminder_sent` 去重）。
-- 人才池归档：入池超过 90 天的记录自动 `archived`。
-
-### 6.7 简历解析（`services/resume_analyzer.py`）
-
-- txt / docx / pdf 直接解析；PDF 提取文本过少（<50 字符）判定为扫描件，逐页渲染 300dpi 图片走 PaddleOCR。
-- 图片（jpg/png/bmp/tiff 等）直接 OCR。
-- `analyze_resume()`：LLM 结构化提取 + 匹配度评分（overall_score + dimensions + strengths/risks）。
-
-### 6.8 考试分析（`routers/exam_analysis.py` + `services/exam_analysis_svc.py`）
-
-- `POST /api/exam-analysis/webhook`：轻速云回调入口，需 `X-Webhook-Token` 头（`EXAM_WEBHOOK_TOKEN`）。
-- 收到后异步调用 Dify Workflow 分析；未配置 `DIFY_API_KEY` 时使用内置模拟分析。
-
-### 6.9 RAG 服务（`rag_service/`，制度问答）
-
-- 索引：文档 → **双层分块**（父 1200 / 子 300，重叠 50）→ BGE-M3 稠密+稀疏向量 → Milvus（集合 `policy_docs_v2`）。
-- 查询：关键词/LLM 判定是否制度问题 → 混合检索（稠密 1.0 / 稀疏 0.7）→ 子块命中→父块去重 →
-  CrossEncoder 重排（Top5）→ LLM 生成答案并附引用来源。
-- 语义缓存：Redis，embedding 相似度 ≥ 0.92 直接命中缓存（TTL 24h）。
-- `POST /api/chat/stream`：SSE 流式（progress / sources / token / done）。
-- 对话历史写入 `policy_chat_history`（按 `session_id`）。
-
-### 6.10 前端（`frontend/`）
-
-- 路由：`/login` 公开；其余经 `ProtectedRoute` 鉴权后进入 `Layout`（侧边栏 + 顶栏）。
-- 登录态：JWT 存 `localStorage`（key：`boos_bot_auth`），`api.ts` 统一注入 `Authorization`，401 自动登出。
-- SSE 解析：`lib/api.ts` 内置 ReadableStream 解析器，逐事件分发（token/progress/done/sources）。
-- 页面：Dashboard / Candidates / CandidateDetail / Questionnaires / Interviews / PolicyAgent(AI 问答) / Pipeline(流程管道) / ExamAnalysis。
-
----
-
-## 7. 快速开始
-
-### 7.1 本地开发
+### 1. 本地开发
 
 ```bash
-# 1. 准备环境
-cp .env.example .env          # 填入 OPENAI_API_KEY / DATABASE_URL 等
-# 依赖按服务拆分安装（二选一）：
+# ① 准备环境变量
+cp .env.example .env
+#    填入 OPENAI_API_KEY / OPENAI_BASE_URL / OPENAI_MODEL / DATABASE_URL 等
+
+# ② 安装依赖（二选一）
 pip install -r backend/requirements.txt -r rag_service/requirements.txt
-# 或 pip install -e ./backend -e ./rag_service  （走 pyproject.toml）
+# 或： pip install -e ./backend -e ./rag_service   （走 pyproject.toml）
 
-# 2. 一键启动（backend + frontend + rag）
+# ③ 一键启动（Backend + Frontend，默认不含 RAG）
 python start_all.py
-
-# 3. 访问
-#   Web:   http://localhost:18016
-#   API:   http://127.0.0.1:18000/docs  (Swagger)
-#   RAG:   http://127.0.0.1:18003/docs
 ```
 
-前端也可单独跑：`cd frontend && npm install && npm run dev`（Vite 已配置 `/api` 代理到 18000）。
-
-### 7.2 初始化管理员
+前端 / 后端 / RAG 也可分别启动：
 
 ```bash
-# 方式一：API（仅当库里还没有任何管理员时可用）
-POST /api/auth/setup  {"username":"admin","password":"至少6位","email":"..."}
+# Backend（:18000，Swagger 在 /docs）
+cd backend && python -m uvicorn app.main:app --app-dir src --host 127.0.0.1 --port 18000
 
-# 方式二：脚本（已有管理员会跳过）
+# Frontend（:18016，/api、/rag-api 自动代理）
+cd frontend && npm install && npm run dev
+
+# RAG Service（:18003）
+cd rag_service && python start.py
+```
+
+| 访问入口 | 地址 |
+|----------|------|
+| Web 控制台 | http://localhost:18016 |
+| Backend Swagger | http://127.0.0.1:18000/docs |
+| RAG Swagger | http://127.0.0.1:18003/docs |
+
+### 2. 初始化管理员
+
+系统**无任何管理员时**，二选一：
+
+```bash
+# 方式一：调用初始化接口
+POST /api/auth/setup   {"username":"admin","password":"至少6位","email":"admin@example.com"}
+
+# 方式二：运行脚本（存在管理员自动跳过）
 python seed_admin.py --username admin --password yourpass --email admin@example.com
 ```
 
-> 说明：当前开发库中已存在管理员账号 `boss`（密码 `boss123456`），可直接登录体验。
+> 后续新增 HR / 面试官账号须由已登录的 admin 调用 `POST /api/auth/register` 创建。
 
-### 7.3 Docker 部署
+### 3. Docker 部署（基础设施 + 应用）
 
 ```bash
-docker compose up -d          # backend + rag-service + milvus + minio + rabbitmq + worker
+docker compose up -d
 ```
 
-> 注意：Backend 容器内 uvicorn 监听 8000，宿主机通过 18000 访问（`18000:8000`）。
-> 前端容器目前未启用（docker-compose 中已注释，可自行补 `Dockerfile.frontend`）。
+包含：`backend`、`rag-service`、`mysql`、`minio`、`milvus-standalone`、`rabbitmq`、`backend-worker`。
+
+> - Backend 镜像内 uvicorn 监听 `8000`，宿主机映射为 `18000`（`18000:8000`）。
+> - 前端镜像未包含在 compose 中（Dockerfile 待补），生产建议 `npm run build` 后用 Nginx 托管静态产物并反代 `:18000`。
+> - MySQL / Milvus / RabbitMQ 均有健康检查，Backend 与 Worker 等待依赖就绪后才启动。
 
 ---
 
-## 8. 配置说明（.env，唯一配置源）
+## 环境变量
+
+以根目录 `.env` 为唯一配置源（Backend / RAG 服务共用），模板见 `.env.example`。
 
 | 变量 | 必填 | 说明 |
 |------|------|------|
-| `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL` | 是 | LLM 配置（OpenAI 兼容） |
-| `DATABASE_URL` | 是 | `mysql+aiomysql://...`（生产）或 `sqlite+aiosqlite:///./recruit.db` |
-| `JWT_SECRET` / `JWT_EXPIRE_HOURS` | 是 | JWT 密钥（生产至少 32 字节随机值）与有效期 |
-| `MILVUS_HOST` / `MILVUS_PORT` | 是 | 向量库（RAG 需要） |
-| `EMBEDDING_MODEL` | 是 | 向量化模型 |
-| `SCORE_THRESHOLD_*` | 否 | 分流阈值：FAST_TRACK=80 / QUESTIONNAIRE=60 / TALENT_POOL=40 |
+| `OPENAI_API_KEY` | ✅ | OpenAI 兼容接口密钥 |
+| `OPENAI_BASE_URL` | ✅ | 接口地址（示例默认 `https://api.deepseek.com`） |
+| `OPENAI_MODEL` | ✅ | 模型名（示例默认 `deepseek-v4-flash`） |
+| `DATABASE_URL` | ✅ | `mysql+aiomysql://user:pass@host:3306/recruit_ai?...`，也支持 SQLite |
+| `JWT_SECRET` | ✅ | 生产务必 ≥32 字节随机值（`python -c "import secrets;print(secrets.token_urlsafe(32))"`） |
+| `MILVUS_HOST` / `MILVUS_PORT` | RAG | Milvus 向量库地址 |
+| `EMBEDDING_MODEL` | RAG | 向量化模型 |
 | `SMTP_*` / `NOTIFICATION_EMAIL_FROM` | 否 | 邮件通知 |
-| `RABBITMQ_URL` / `TASK_ENABLED` 等 | 否 | 异步队列（不可用时自动降级） |
+| `SCORE_THRESHOLD_FAST_TRACK` 等 | 否 | 分流阈值，默认 80 / 60 / 40 |
+| `SCORE_WEIGHTS_*` | 否 | 评分权重与按岗位类别覆盖（代码内置默认值） |
+| `RABBITMQ_URL` / `TASK_*` | 否 | 异步任务队列，不可达时自动降级内联 |
 | `REDIS_URL` / `SEMANTIC_CACHE_*` | 否 | RAG 语义缓存 |
-| `EXAM_WEBHOOK_TOKEN` | 否 | 考试平台回调签名 |
-| `DIFY_API_URL` / `DIFY_API_KEY` | 否 | 考试分析（未配置走模拟） |
+| `DIFY_API_URL` / `DIFY_API_KEY` | 否 | 试卷分析；未配置返回内置模拟分析 |
 | `DINGTALK_APP_KEY` / `DINGTALK_APP_SECRET` | 否 | 钉钉日历集成 |
-| `RESUME_PARSER_URL` 等 Agent 地址 | 否 | 旧独立 Agent 服务地址（失败自动降级内联） |
+| `EXAM_WEBHOOK_TOKEN` | 否 | 考试平台回调签名（`X-Webhook-Token`） |
 
 ---
 
-## 9. API 一览
+## API 一览
+
+完整可交互文档见 Backend `/docs`、RAG `/docs`。按模块速览：
 
 | 前缀 | 说明 | 主要端点 |
 |------|------|----------|
-| `/api/auth` | 认证 | setup / register / login / me / change-password |
-| `/api/candidates` | 候选人 CRUD | GET/POST 列表、GET/PUT/DELETE 详情 |
-| `/api/resumes` | 简历 | upload、`{id}/analyze`、`{id}/analyze/stream`(SSE)、`candidate/{cid}` |
-| `/api/questionnaires` | 问卷 | send-link、`candidate/{cid}` |
-| `/api/interviews` | 面试 | generate-slots、confirm-slot、feedback、`candidate/{cid}` |
-| `/api/workflow` | 招聘流程 | start(可入队)、`start/{id}/stream`(SSE)、status、pipeline、talent-pool、function-call(SSE)、`task/{id}` |
-| `/api/policy` | 制度文档 | documents upload/list/delete、chat(SSE)、`history/{sid}` |
-| `/api/dashboard` | 统计 | stats |
-| `/api/llm` | 可观测性 | logs、stats |
-| `/api/exam-analysis` | 试卷分析 | webhook、列表 |
-| RAG `/api/chat` / `/api/documents` | 制度问答 | `chat/stream`(SSE)、documents upload/index |
+| `/api/auth` | 认证 | `POST /setup`（首个管理员）、`POST /register`（admin 建账号）、`POST /login`、`GET /me`、`POST /change-password` |
+| `/api/candidates` | 候选人 | `POST /`、`GET /`（分页/搜索/状态）、`GET/PUT/DELETE /{id}` |
+| `/api/resumes` | 简历 | `POST /upload`、`POST /{rid}/analyze`、`POST /{rid}/analyze/stream`（SSE）、`GET /candidate/{cid}` |
+| `/api/questionnaires` | 问卷 | `POST /send-link`、`GET /`（全量总览+筛选）、`GET /{qid}`、`GET /candidate/{cid}` |
+| `/api/interviews` | 面试 | `POST /generate-slots`、`POST /confirm-slot`、`POST /feedback`、`GET /calendar?start&end`、`POST /{id}/cancel`、`GET /candidate/{cid}`、`GET /{id}` |
+| `/api/workflow` | 招聘流程 | `POST /start/{cid}`、`POST /auto-process/{cid}`、`GET /pipeline`、`GET /talent-pool`、`POST /talent-pool/reactivate`、`GET /status/{cid}`、`POST /function-call/stream`、`POST /start/{cid}/stream`、`GET /task/{tid}` |
+| `/api/dashboard` | 统计 | `GET /stats`、`GET /score-buckets`、`POST /scoring-weights`（admin） |
+| `/api/scoring` | 评分优化 | `GET /insights`（通过率+维度区分度+建议权重）、`POST /iterations`（应用并落迭代历史）、`GET /iterations` |
+| `/api/policy` | 制度文档管理 | `POST /documents/upload`、`GET /documents`、`DELETE /documents/{id}`、`POST /chat`、`POST /chat/stream` |
+| `/api/llm` | LLM 可观测性（后端） | `GET /logs`、`GET /logs/{id}`、`GET /stats` |
+| `/api/exam-analysis` | 试卷分析 | `POST /webhook`（回调）、`GET /`（分页）、`POST /import` |
+| RAG `/api/documents` | RAG 文档 | `POST /upload`、`POST /index/{id}`、`GET /`、`DELETE /{id}`、`POST /reindex` |
+| RAG `/api/chat` | 制度问答 | `POST /`、`POST /stream`（SSE）、`GET /history/{session_id}` |
 
 ---
 
-## 10. 测试
+## 测试
 
 ```bash
-cd backend && pytest -q        # routers / workflow 阈值分流 / llm_client
-cd rag_service && pytest -q    # policy_rag 管线测试
+cd backend && pytest -q      # routers / workflow 阈值分流 / scoring / resume_analyzer / llm_client
+cd rag_service && pytest -q # policy_rag 管线
 ```
 
 测试要点：
-- `tests/test_workflow.py`：状态字段、阈值分流（80/60/40）、图可编译。
-- `tests/test_routers.py`：健康检查、登录/注册权限、未认证访问被拒。
-- `tests/test_llm_client.py`：LLM 客户端与 Trace 装饰器（注入 mock）。
+- `test_workflow.py`：State 字段、阈值分流（80/60/40）、图可编译。
+- `test_routers.py`：健康检查、登录/注册权限、未认证访问被拒。
+- `test_scoring.py`：评分权重合法性与计算逻辑。
+- `test_llm_client.py`：LLM 客户端与 Trace 装饰器（注入 mock）。
 
 ---
 
-## 11. 已知问题与注意事项
+## 部署建议
 
-1. **数据库无迁移工具**：目前用 `Base.metadata.create_all` 建表，表结构变更需手动迁移（未接入 Alembic）。
-2. **问卷为简化模式**：当前问卷只发送固定链接（轻速云），不生成题目/评分；工作流中问卷通道默认「完成即通过」。
-3. **RabbitMQ / Milvus / Redis 均为可选**：不可达时分别降级为内联执行 / 跳过向量检索 / 跳过缓存，但会显著影响对应能力。
-4. **Docker 前端未启用**：docker-compose 中 frontend 服务被注释，容器部署时需自行补充前端镜像。
-5. **候选状态字符串松散**：工作流节点直接写 `parsed` 等状态字符串，与 `CandidateStatus` 枚举不完全对齐。
-6. **`passlib` 依赖已不使用**：密码哈希改为直接使用 `bcrypt`（`bcrypt>=5.0.0` 与 passlib 不兼容）。
+- **开发环境**：单机即可（8C16G 以下即可流畅运行）；`python start_all.py` 一键起。
+- **生产 ECS（推荐 Ubuntu 22.04）**：
+  1. `apt install docker.io docker-compose-plugin`（或 `curl -fsSL https://get.docker.com | sh`）；
+  2. `git clone` 项目并写好根目录 `.env`（**LLM Key、JWT_SECRET、数据库密码由自己填，勿外泄**）；
+  3. `docker compose up -d` 拉起 MySQL / Milvus / RabbitMQ 等基础设施；
+  4. Backend 与 Worker 就绪后 `python seed_admin.py` 初始化首个管理员；
+  5. 前端 `cd frontend && npm run build`，产物放 Nginx 静态目录，并反向代理 `/api` → `:18000`、`/rag-api` → `:18003`。
 
----
-
-## 12. 如何学习这个项目（简版）
-
-推荐顺序：**README → models → main.py + 1 个 router → workflow/（state + graph + nodes）→ agents/ → lib/api.ts + 1 个页面 → rag_service**。
-详细的分步学习路线（含每个文件看什么、做什么练习）见会话中的完整说明。
+> 建议配置：生产可按 2C4G 起步（Backend + RAG + 轻量 Milvus），承载数十~数百候选人/日的规模；更高并发时给 MySQL 单独机器并横向扩展 `backend-worker`。
 
 ---
 
-*架构审核与本文档由 Codex 基于代码实际内容整理。*
+## 已知限制
+
+1. **建表非迁移式**：当前用 `Base.metadata.create_all`，字段变更需手动 ALTER（无 Alembic 自动迁移）。
+2. **问卷为简化模式**：发送固定链接（轻速云等），不内置题目与作答评分；问卷通道默认「完成即通过」。
+3. **评分权重应用为进程内存热更新**：与仪表盘一致，重启后回退 `.env`/代码默认值；每次应用都会写入 `scoring_iterations` 迭代历史。
+4. **可选基础设施**（RabbitMQ / Milvus / Redis）不可达时分别降级为内联执行 / 跳过向量检索 / 跳过缓存，能力会受相应影响。
+5. **Docker 前端未内置**：compose 中 frontend 处于注释状态，生产需自行补前端镜像或用 Nginx 托管产物。
+6. **角色模型**：RBAC 面向 admin / hr / interviewer；候选人侧交互（确认面试、填问卷）通过公开链接/口令完成，暂无候选人账号体系。
+
+---
+
+*说明：本文档基于仓库当前代码实际结构与行为编写；`.env.example` 为环境变量唯一模板。*

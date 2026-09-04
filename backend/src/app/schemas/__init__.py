@@ -15,6 +15,7 @@ from app.schemas.resume import (
 from app.schemas.interview import (
     TimeSlot, InterviewSlotRequest, InterviewSlotResponse,
     SlotConfirm, InterviewResponse, InterviewFeedback,
+    ManualScheduleRequest,
 )
 from app.schemas.notification import (
     NotificationRequest, NotificationResponse, WorkflowStatusResponse,
@@ -41,6 +42,7 @@ __all__ = [
     # interview
     "TimeSlot", "InterviewSlotRequest", "InterviewSlotResponse",
     "SlotConfirm", "InterviewResponse", "InterviewFeedback",
+    "ManualScheduleRequest",
     # notification
     "NotificationRequest", "NotificationResponse", "WorkflowStatusResponse",
     # questionnaire

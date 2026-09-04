@@ -108,6 +108,12 @@ class Settings(BaseSettings):
     # 外部考试平台回调签名密钥。为空时不接受回调，避免匿名写入招聘数据。
     EXAM_WEBHOOK_TOKEN: Optional[str] = None
 
+    # Workmenul（自研答题看板）查询接口地址，如 http://host:8088。
+    # 非空时后台定时拉取其终态答卷，导入到试卷分析（幂等 upsert）。
+    WORKMENUL_API_BASE: Optional[str] = None
+    # 拉取 Workmenul 答卷的周期（秒）
+    EXAM_SYNC_INTERVAL_SECONDS: int = 60
+
 
     # 面试相关默认值
     DEFAULT_INTERVIEW_DURATION: int = 60         # 默认面试时长（分钟）

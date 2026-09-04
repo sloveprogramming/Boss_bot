@@ -1,10 +1,11 @@
-"""企业制度文档管理 API — 文档入库 + 自动索引 + 简单问答"""
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+"""企业制度文档管理 API — 文档入库 + 自动索引 + 简单问答 + 账号会话历史"""
+import os
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
-from app.models import PolicyDocument, UserRole
+from app.models import PolicyDocument, PolicyChatHistory, UserRole, User
 from app.dependencies import require_role
 from pydantic import BaseModel
 from typing import Optional
@@ -15,10 +16,23 @@ router = APIRouter(
     dependencies=[Depends(require_role([UserRole.ADMIN, UserRole.HR]))],
 )
 
+# 向量化统一由 rag_service 负责（bge-m3 混合检索，服务名 rag-service 于 docker 网络内可达）
+RAG_SERVICE_URL = os.getenv("RAG_SERVICE_URL", "http://rag-service:18003")
+
 
 class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
+
+
+async def _index_via_rag(doc_id: int) -> dict:
+    """把文档交给 rag_service 做真实向量化（返回 {chunks, parents}）"""
+    import httpx
+    url = f"{RAG_SERVICE_URL}/api/documents/index/{doc_id}"
+    async with httpx.AsyncClient(timeout=300) as client:
+        resp = await client.post(url)
+        resp.raise_for_status()
+        return resp.json()
 
 
 # ========== 文档入库 ==========
@@ -66,30 +80,27 @@ async def upload_document(
     await db.flush()
     await db.refresh(doc_record)
 
-    # 后台异步索引到 Milvus
-    import asyncio
-    asyncio.create_task(_index_document_bg(doc_record.id))
+    # 先提交，让 rag_service 能读到这条新文档，再由它做真实向量化（bge-m3）
+    await db.commit()
+
+    index_ok, chunk_count = False, 0
+    warning = None
+    try:
+        r = await _index_via_rag(doc_record.id)
+        index_ok, chunk_count = True, int(r.get("chunks", 0))
+    except Exception as e:
+        warning = f"文档已保存，但向量索引未完成（rag_service 不可用或失败）：{str(e)}"
 
     return {
         "id": doc_record.id,
         "title": doc_record.title,
         "category": doc_record.category,
-        "file_name": file.filename,
-        "message": "文档已保存，正在后台索引到向量库...",
+        "file_name": doc_record.file_name,
+        "indexed": index_ok,
+        "chunk_count": chunk_count,
+        "message": "文档已保存并完成索引" if index_ok else "文档已保存（向量索引未完成）",
+        "warning": warning,
     }
-
-
-async def _index_document_bg(doc_id: int):
-    """后台任务：在线程中执行同步索引（避免 asyncio 冲突）"""
-    import asyncio
-    from app.services import index_document_sync
-
-    loop = asyncio.get_event_loop()
-    try:
-        chunks = await loop.run_in_executor(None, index_document_sync, doc_id)
-        print(f"[索引完成] doc_id={doc_id}, chunks={chunks}")
-    except Exception as e:
-        print(f"[索引失败] doc_id={doc_id}: {e}")
 
 
 # ========== 文档列表 ==========
@@ -116,17 +127,25 @@ async def list_documents(db: AsyncSession = Depends(get_db)):
 
 
 @router.delete("/documents/{doc_id}")
-async def delete_document(doc_id: int, db: AsyncSession = Depends(get_db)):
-    """删除指定制度文档"""
-    result = await db.execute(
-        select(PolicyDocument).where(PolicyDocument.id == doc_id)
-    )
-    doc = result.scalar_one_or_none()
-    if not doc:
-        raise HTTPException(status_code=404, detail="文档不存在")
-    await db.delete(doc)
-    await db.flush()
-    return {"status": "deleted", "doc_id": doc_id}
+async def delete_document(doc_id: int):
+    """删除指定制度文档
+
+    文档记录与 Milvus 向量分块统一交给 rag_service 级联删除，
+    保证删除后 RAG 不再引用该文档内容。
+    """
+    import httpx
+    url = f"{RAG_SERVICE_URL}/api/documents/{doc_id}"
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.delete(url)
+        if resp.status_code == 404:
+            raise HTTPException(status_code=404, detail="文档不存在")
+        resp.raise_for_status()
+        return resp.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"删除失败（rag_service 不可用或向量清理失败）：{str(e)}")
 
 
 # ========== 简单问答（关键词匹配，不依赖 Milvus） ==========
@@ -224,3 +243,126 @@ async def chat_with_docs_stream(data: ChatRequest, db: AsyncSession = Depends(ge
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
     )
+
+
+# ========== 会话历史（按账号隔离，主后端持久化） ==========
+# RAG 服务(:18003)只负责流式回答，不落库；
+# 前端在提问/回答完成后调用这里写入 policy_chat_history，读取时一律按当前账号过滤。
+
+class HistoryMessageIn(BaseModel):
+    session_id: str
+    role: str = "user"                       # user / assistant
+    content: str
+    cited_sources: Optional[list] = None
+
+
+@router.get("/sessions")
+async def list_policy_sessions(
+    current_user: User = Depends(require_role([UserRole.ADMIN, UserRole.HR])),
+    db: AsyncSession = Depends(get_db),
+):
+    """当前账号的全部制度问答会话（按最近活跃倒序）"""
+    rows = (
+        await db.execute(
+            select(PolicyChatHistory)
+            .where(PolicyChatHistory.username == current_user.username)
+            .order_by(PolicyChatHistory.id.asc())
+        )
+    ).scalars().all()
+
+    # 升序遍历：标题取最早一条 user 消息；预览与 last_id 持续覆盖 -> 最新一条
+    by_sid: dict[str, dict] = {}
+    for r in rows:
+        s = by_sid.setdefault(r.session_id, {
+            "session_id": r.session_id,
+            "count": 0,
+            "title": "",
+            "last_preview": "",
+            "last_id": r.id,
+        })
+        s["count"] += 1
+        s["last_preview"] = (r.content or "")[:100]
+        s["last_id"] = r.id
+        if r.role == "user" and not s["title"]:
+            s["title"] = (r.content or "").replace("\n", " ").strip()[:40]
+
+    sessions = sorted(by_sid.values(), key=lambda s: s["last_id"], reverse=True)
+    return {
+        "sessions": [
+            {
+                "session_id": s["session_id"],
+                "title": s["title"] or "新会话",
+                "last_preview": s["last_preview"],
+                "count": s["count"],
+            }
+            for s in sessions
+        ]
+    }
+
+
+@router.get("/history")
+async def get_policy_history(
+    session_id: str = Query(...),
+    current_user: User = Depends(require_role([UserRole.ADMIN, UserRole.HR])),
+    db: AsyncSession = Depends(get_db),
+):
+    """读取某个会话的消息（仅限本账号）"""
+    rows = (
+        await db.execute(
+            select(PolicyChatHistory)
+            .where(
+                PolicyChatHistory.username == current_user.username,
+                PolicyChatHistory.session_id == session_id,
+            )
+            .order_by(PolicyChatHistory.id.asc())
+        )
+    ).scalars().all()
+    return {
+        "session_id": session_id,
+        "messages": [
+            {
+                "role": r.role,
+                "content": r.content,
+                "created_at": r.created_at.isoformat() if r.created_at else "",
+            }
+            for r in rows
+        ],
+    }
+
+
+@router.post("/messages")
+async def add_policy_message(
+    data: HistoryMessageIn,
+    current_user: User = Depends(require_role([UserRole.ADMIN, UserRole.HR])),
+    db: AsyncSession = Depends(get_db),
+):
+    """追加一条消息到某会话（归属当前账号）"""
+    rec = PolicyChatHistory(
+        username=current_user.username,
+        session_id=data.session_id.strip()[:100],
+        role=data.role if data.role in ("user", "assistant") else "user",
+        content=(data.content or "").strip()[:4000],
+        cited_sources=data.cited_sources,
+    )
+    if not rec.content:
+        raise HTTPException(status_code=400, detail="消息内容不能为空")
+    db.add(rec)
+    await db.flush()
+    return {"id": rec.id}
+
+
+@router.delete("/sessions/{session_id}")
+async def delete_policy_session(
+    session_id: str,
+    current_user: User = Depends(require_role([UserRole.ADMIN, UserRole.HR])),
+    db: AsyncSession = Depends(get_db),
+):
+    """删除某个会话的全部消息（仅限本账号）"""
+    result = await db.execute(
+        delete(PolicyChatHistory).where(
+            PolicyChatHistory.username == current_user.username,
+            PolicyChatHistory.session_id == session_id,
+        )
+    )
+    await db.flush()
+    return {"deleted": result.rowcount}

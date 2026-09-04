@@ -51,9 +51,11 @@ async def upload_document(
     # 自动索引到 Milvus
     try:
         await policy_rag_agent.index_document(doc.id, db)
+        await db.commit()
     except Exception as e:
         doc.indexed = False
         await db.flush()
+        await db.commit()
         return {
             "id": doc.id, "title": doc.title, "category": doc.category,
             "indexed": False, "warning": f"文件已保存，但索引失败: {str(e)}",
@@ -68,6 +70,7 @@ async def index_document(doc_id: int, db: AsyncSession = Depends(get_db)):
     """将指定文档索引到 Milvus（供主 Backend 上传后调用）"""
     try:
         result = await policy_rag_agent.index_document(doc_id, db)
+        await db.commit()   # rag_service get_db 不自动提交，必须显式 commit 落库
         return {
             "doc_id": doc_id,
             "indexed": True,
@@ -98,20 +101,26 @@ async def list_documents(db: AsyncSession = Depends(get_db)):
 
 @router.delete("/{doc_id}")
 async def delete_document(doc_id: int, db: AsyncSession = Depends(get_db)):
-    """删除制度文档"""
+    """删除制度文档（同步清除 Milvus 向量，供主 Backend 删除时调用）"""
     result = await db.execute(
         select(PolicyDocument).where(PolicyDocument.id == doc_id)
     )
     doc = result.scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="文档不存在")
+    # 先清向量：若失败则整体返回错误，保留记录，避免 DB/向量不一致
+    try:
+        await policy_rag_agent.remove_from_milvus(doc_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"向量清理失败: {str(e)}")
     await db.delete(doc)
-    await db.flush()
-    return {"status": "deleted"}
+    await db.commit()   # rag_service get_db 不自动提交，必须显式 commit 落库
+    return {"status": "deleted", "doc_id": doc_id}
 
 
 @router.post("/reindex")
 async def reindex_all(db: AsyncSession = Depends(get_db)):
     """清空并重新索引所有文档"""
     result = await policy_rag_agent.reindex_all(db)
+    await db.commit()   # rag_service get_db 不自动提交，必须显式 commit 落库
     return result

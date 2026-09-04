@@ -1,8 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { AlertCircle, Award, CheckCircle2, ChevronRight, ClipboardCheck, Database, XCircle } from "lucide-react";
+import { AlertCircle, Award, CheckCircle2, ChevronRight, ClipboardCheck, Database, Download, RefreshCw, XCircle } from "lucide-react";
 import { api, errDetail } from "../lib/api";
 import { Badge, Button, Card, Drawer, EmptyState, PageHeader, Spinner, useToast } from "../components/ui";
-import type { ExamAnalysisItem } from "../types";
+import type { ExamAnalysisItem, ExamAnswerQuestion } from "../types";
 
 const STAT_GRADS = [
   "from-indigo-500 to-blue-500",
@@ -28,6 +28,34 @@ const scoreTextCls = (it: ExamAnalysisItem): string => {
   if (it.exam_score == null) return "text-slate-300";
   const pct = scorePct(it);
   return pct != null && pct >= 60 ? "text-emerald-600" : "text-rose-500";
+};
+
+// 从 Content-Disposition 解析文件名（优先 filename*=utf-8''…）
+const filenameFromCd = (cd?: string, fallback = "分析报告.docx"): string => {
+  if (!cd) return fallback;
+  const star = /filename\*=utf-8''([^;]+)/i.exec(cd);
+  if (star) {
+    try { return decodeURIComponent(star[1]); } catch { return star[1]; }
+  }
+  const plain = /filename="?([^";]+)"?/i.exec(cd);
+  return plain ? plain[1] : fallback;
+};
+
+// blob 类型响应（下载）出错时，错误体也是 Blob，需先读成文本再取 detail
+const blobErrDetail = async (e: unknown): Promise<string> => {
+  const r = (e as { response?: { status?: number; data?: unknown } })?.response;
+  if (r?.data && typeof Blob !== "undefined" && r.data instanceof Blob) {
+    try {
+      const t = await (r.data as Blob).text();
+      try {
+        const j = JSON.parse(t);
+        if (typeof j?.detail === "string") return j.detail;
+      } catch { /* 非 JSON */ }
+      if (t) return t;
+    } catch { /* 忽略 */ }
+    return `下载失败 (HTTP ${r.status ?? ""})`;
+  }
+  return errDetail(e);
 };
 
 function StatCard({ icon: Icon, label, value, sub, grad, delay }: {
@@ -85,6 +113,7 @@ function DetailPanel({ it }: { it: ExamAnalysisItem }) {
       </div>
 
       <dl className="rounded-xl border border-slate-100 bg-white/70 px-4 py-1.5">
+        <DetailRow k="面试岗位" v={it.candidate_position || "—"} />
         <DetailRow k="试卷" v={it.exam_title || "—"} />
         <DetailRow
           k="得分"
@@ -108,10 +137,12 @@ function DetailPanel({ it }: { it: ExamAnalysisItem }) {
         </div>
       )}
 
+      <AnswerDetailSection it={it} />
+
       <section>
         <h4 className="text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wide">AI 分析结果</h4>
         {it.analysis_result && Object.keys(it.analysis_result).length > 0 ? (
-          <ResultView data={it.analysis_result} />
+          <AnalysisReport data={it.analysis_result} />
         ) : (
           <p className="text-sm text-slate-300">暂无分析结果</p>
         )}
@@ -143,6 +174,63 @@ function ResultView({ data }: { data: Record<string, unknown> }) {
   );
 }
 
+// ===== 答题明细（来自 Workmenul answerDetail） =====
+function AnswerBadge({ correct }: { correct?: boolean | null }) {
+  if (correct === true) return <Badge label="对" cls="bg-emerald-50 text-emerald-600" />;
+  if (correct === false) return <Badge label="错" cls="bg-rose-50 text-rose-600" />;
+  return <Badge label="未判" cls="bg-slate-100 text-slate-500" />;
+}
+
+function QuestionItem({ idx, q }: { idx: number; q: ExamAnswerQuestion }) {
+  const right = Array.isArray(q.rightAnswers) ? q.rightAnswers.join(" / ") : q.rightAnswers;
+  return (
+    <div className="px-4 py-3 space-y-1.5">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm font-medium text-slate-700">
+          第 {idx + 1} 题{q.questionType ? ` · ${q.questionType}` : ""}
+        </p>
+        <AnswerBadge correct={q.isCorrect} />
+      </div>
+      <p className="text-sm text-slate-600 leading-relaxed">{q.questionContent || "—"}</p>
+      <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-slate-400">
+        <span>我的答案：<b className="text-slate-600 font-medium">{q.userAnswer ?? "—"}</b></span>
+        {right != null && String(right).trim() !== "" && (
+          <span>正确答案：<b className="text-slate-600 font-medium">{String(right)}</b></span>
+        )}
+        {q.realScore != null && <span>得分：<b className="text-slate-600 font-medium">{q.realScore}</b></span>}
+      </div>
+    </div>
+  );
+}
+
+function AnswerDetailSection({ it }: { it: ExamAnalysisItem }) {
+  const questions = it.raw_data?.answerDetail?.questions;
+  if (!Array.isArray(questions) || questions.length === 0) return null;
+  return (
+    <section>
+      <h4 className="text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wide">
+        答题明细（{questions.length} 题）
+      </h4>
+      <div className="rounded-xl border border-slate-100 bg-white/70 divide-y divide-slate-50 overflow-hidden">
+        {questions.map((q, i) => <QuestionItem key={i} idx={i} q={q} />)}
+      </div>
+    </section>
+  );
+}
+
+// 报告正文若为 {"分析报告": "<长文本>"}，按长文本卡片渲染，比 JSON 平铺更易读
+function AnalysisReport({ data }: { data: Record<string, unknown> }) {
+  const text = typeof data["分析报告"] === "string" ? (data["分析报告"] as string).trim() : "";
+  if (text) {
+    return (
+      <div className="rounded-xl border border-slate-100 bg-white/70 px-4 py-3 text-sm text-slate-700 whitespace-pre-wrap leading-relaxed max-h-[30rem] overflow-y-auto">
+        {text}
+      </div>
+    );
+  }
+  return <ResultView data={data} />;
+}
+
 export default function ExamAnalysis() {
   const { toast } = useToast();
   const [items, setItems] = useState<ExamAnalysisItem[]>([]);
@@ -150,6 +238,8 @@ export default function ExamAnalysis() {
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [downloading, setDownloading] = useState<number | null>(null);
   const pageSize = 20;
 
   const load = (p: number) => {
@@ -160,7 +250,50 @@ export default function ExamAnalysis() {
       .finally(() => setLoading(false));
   };
 
+  const doSync = () => {
+    setSyncing(true);
+    api.exam.sync()
+      .then((r) => {
+        toast(`已同步 Workmenul：新增 ${r.data.imported} 条，更新 ${r.data.updated} 条`, "ok");
+        load(page);
+      })
+      .catch((e) => toast(errDetail(e), "err"))
+      .finally(() => setSyncing(false));
+  };
+
+  // 下载与 Workmenul 看板一致的 Word 报告（后端反代，返回 docx blob）
+  const doDownload = async (it: ExamAnalysisItem) => {
+    if (downloading != null) return;
+    setDownloading(it.id);
+    try {
+      const resp = await api.exam.downloadReport(it.id);
+      const cd = typeof resp.headers["content-disposition"] === "string"
+        ? resp.headers["content-disposition"] as string
+        : undefined;
+      const name = filenameFromCd(cd, `${it.candidate_name || "考生"}_测评分析报告.docx`);
+      const url = URL.createObjectURL(resp.data as Blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) {
+      toast(await blobErrDetail(e), "err");
+    } finally {
+      setDownloading(null);
+    }
+  };
+
   useEffect(() => { load(1); /* eslint-disable-next-line */ }, []);
+
+  // 页面停留时每 30s 静默刷新，让 Workmenul 新答卷无需手动操作即可出现
+  useEffect(() => {
+    const t = setInterval(() => { if (!loading && !syncing) load(page); }, 30_000);
+    return () => clearInterval(t);
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [loading, syncing, page]);
 
   const selectedItem = selected != null ? items.find((i) => i.id === selected) ?? null : null;
 
@@ -174,7 +307,16 @@ export default function ExamAnalysis() {
 
   return (
     <>
-      <PageHeader title="试卷分析" desc="考试系统与自研测评推送的分析记录（查看成绩与 AI 分析结果）" />
+      <PageHeader
+        title="试卷分析"
+        desc="考试系统与 Workmenul 自研测评的分析记录（含岗位与逐题作答）"
+        actions={
+          <Button variant="outline" loading={syncing} onClick={doSync} title="从 Workmenul 立即拉取最新答卷">
+            <RefreshCw size={15} />
+            立即同步
+          </Button>
+        }
+      />
 
       {loading && items.length === 0 ? (
         <Spinner />
@@ -195,6 +337,7 @@ export default function ExamAnalysis() {
               <thead>
                 <tr className="text-left text-xs text-slate-400 border-b border-slate-100">
                   <th className="px-4 py-3 font-medium">候选人</th>
+                  <th className="px-4 py-3 font-medium">岗位</th>
                   <th className="px-4 py-3 font-medium">试卷</th>
                   <th className="px-4 py-3 font-medium">得分</th>
                   <th className="px-4 py-3 font-medium">状态</th>
@@ -225,6 +368,7 @@ export default function ExamAnalysis() {
                           </div>
                         </div>
                       </td>
+                      <td className="px-4 py-3 text-slate-500 max-w-[10rem] truncate">{it.candidate_position || "—"}</td>
                       <td className="px-4 py-3 text-slate-600 max-w-[16rem] truncate">{it.exam_title}</td>
                       <td className="px-4 py-3">
                         <div className="min-w-[100px]">
@@ -245,8 +389,21 @@ export default function ExamAnalysis() {
                       </td>
                       <td className="px-4 py-3"><Badge label={st.label} cls={st.cls} /></td>
                       <td className="px-4 py-3 text-slate-400 tabular-nums whitespace-nowrap">{new Date(it.created_at).toLocaleString()}</td>
-                      <td className="px-3 py-3 text-right">
-                        <ChevronRight size={16} className="inline text-slate-300 group-hover:text-brand-400 transition-colors" />
+                      <td className="px-3 py-3 text-right whitespace-nowrap">
+                        <div className="flex items-center justify-end gap-1">
+                          {it.analysis_status === "completed" && it.external_id && (
+                            <button
+                              type="button"
+                              title="下载 Word 报告"
+                              disabled={downloading != null}
+                              onClick={(e) => { e.stopPropagation(); doDownload(it); }}
+                              className="rounded-lg p-1.5 text-slate-300 hover:bg-brand-50 hover:text-brand-500 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                              <Download size={15} className={downloading === it.id ? "animate-pulse" : ""} />
+                            </button>
+                          )}
+                          <ChevronRight size={16} className="inline text-slate-300 group-hover:text-brand-400 transition-colors" />
+                        </div>
                       </td>
                     </tr>
                   );

@@ -1,10 +1,13 @@
 """试卷分析路由 — 轻速云回调 + 看板列表"""
 import asyncio
-import secrets
 import logging
+import secrets
 from typing import Optional
+from urllib.parse import quote
+
+import httpx
 from pydantic import BaseModel
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +20,7 @@ from app.schemas import (
     ExamImportRequest, ExamImportResponse,
 )
 from app.services import exam_analysis_service
+from app.services.workmenul_sync import sync_from_workmenul
 
 logger = logging.getLogger(__name__)
 
@@ -120,3 +124,73 @@ async def import_analysis(
         db, data.model_dump(exclude_none=True)
     )
     return ExamImportResponse(id=record_id, created=created)
+
+
+@router.post("/sync")
+async def sync_from_workmenul_endpoint(
+    db: AsyncSession = Depends(get_db),
+    _: object = Depends(require_role([UserRole.ADMIN, UserRole.HR, UserRole.INTERVIEWER])),
+):
+    """手动触发：从 Workmenul 拉取终态答卷并幂等导入（返回本次统计）"""
+    stats = await sync_from_workmenul(db)
+    if stats.get("checked") == 0:
+        return {**stats, "message": "Workmenul 未配置或无可用记录"}
+    return stats
+
+
+_DOCX_MEDIA = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+
+@router.get("/{analysis_id}/download-report")
+async def download_report(
+    analysis_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: object = Depends(require_role([UserRole.ADMIN, UserRole.HR, UserRole.INTERVIEWER])),
+):
+    """下载与 Workmenul 看板一致的 Word 分析报告（反代其 /report 接口）
+
+    报告 docx 由 Workmenul 侧 Dify 生成并转存，本接口不落库、不重生成，
+    直接转发上游文件，保证下载到的与看板「报告」链接是同一份。
+    """
+    record = await db.get(ExamAnalysis, analysis_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="记录不存在")
+    if not record.external_id:
+        raise HTTPException(status_code=400, detail="该记录并非来自 Workmenul，无原版 Word 报告可下载")
+    base = (settings.WORKMENUL_API_BASE or "").rstrip("/")
+    if not base:
+        raise HTTPException(status_code=503, detail="未配置 WORKMENUL_API_BASE，无法访问 Workmenul")
+
+    url = f"{base}/api/v1/analysis/{record.external_id}/report"
+    try:
+        async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
+            resp = await client.get(url)
+    except Exception as e:
+        logger.warning("[ExamReport] 拉取 Workmenul 报告失败 id=%s: %s", analysis_id, e)
+        raise HTTPException(status_code=502, detail="访问 Workmenul 报告服务失败，请稍后重试") from e
+
+    if resp.status_code != 200:
+        detail = "Workmenul 侧暂无该报告文件（可能签名链接已过期）"
+        try:
+            remote_detail = resp.json().get("detail")
+            if isinstance(remote_detail, str) and remote_detail:
+                detail = remote_detail
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND if resp.status_code == 404 else status.HTTP_502_BAD_GATEWAY,
+            detail=detail,
+        )
+
+    if not resp.content.startswith(b"PK"):
+        logger.warning("[ExamReport] Workmenul 返回非 docx 内容 id=%s", analysis_id)
+        raise HTTPException(status_code=502, detail="Workmenul 返回的不是有效 Word 文件")
+
+    headers = {}
+    cd = resp.headers.get("Content-Disposition")
+    if cd:
+        headers["Content-Disposition"] = cd
+    else:
+        fname = f"{record.candidate_name or '考生'}_测评分析报告.docx"
+        headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(fname)}"
+    return Response(content=resp.content, media_type=_DOCX_MEDIA, headers=headers)

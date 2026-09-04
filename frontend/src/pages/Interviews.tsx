@@ -85,6 +85,8 @@ export default function Interviews() {
   const [open, setOpen] = useState(false);
   const [schedCid, setSchedCid] = useState<number | null>(null);
   const [form, setForm] = useState({ start: "", end: "", interviewers: "面试官" });
+  // 手动指定时间（主）：date + 起止时间；AI 推荐仅作辅助填入
+  const [manual, setManual] = useState({ date: "", start_time: "", end_time: "" });
   const [slots, setSlots] = useState<TimeSlot[]>([]);
   const [interviewId, setInterviewId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -141,13 +143,21 @@ export default function Interviews() {
     setCur({ y: d.getFullYear(), m: d.getMonth() });
   };
 
-  // ===== AI 排期 =====
+  // ===== 约面试（手动为主，AI 推荐为辅） =====
+  const resetSchedForm = () => {
+    setForm({ start: "", end: "", interviewers: "面试官" });
+    setManual({ date: "", start_time: "", end_time: "" });
+    setSlots([]); setInterviewId(null);
+  };
+
   const openSched = (cid: number | null = null) => {
     setSchedCid(cid ?? filterCid);
-    setForm({ start: "", end: "", interviewers: "面试官" });
-    setSlots([]); setInterviewId(null);
+    resetSchedForm();
     setOpen(true);
   };
+
+  const parseInterviewers = () =>
+    form.interviewers.split(/[,，、]/).map((s) => s.trim()).filter(Boolean);
 
   const genSlots = async () => {
     if (!schedCid || !form.start || !form.end) { toast("请选择候选人和日期范围", "err"); return; }
@@ -158,26 +168,48 @@ export default function Interviews() {
         candidate_id: schedCid,
         date_range_start: form.start,
         date_range_end: form.end,
-        interviewers: form.interviewers.split(/[,，、]/).map((s) => s.trim()).filter(Boolean),
+        interviewers: parseInterviewers(),
       });
       setSlots(data.proposed_slots ?? []);
       setInterviewId(data.interview_id);
-      toast(`已生成 ${data.proposed_slots?.length ?? 0} 个可选时间段`);
+      toast(`已生成 ${data.proposed_slots?.length ?? 0} 个参考时段，点选自动填入上方时间`);
     } catch (e) { toast(errDetail(e), "err"); }
     finally { setBusy(false); }
   };
 
-  const confirmSlot = async (slot: TimeSlot) => {
-    if (!interviewId) return;
+  // AI 推荐时段 → 填入手动时间（不直接确认，HR 可微调后再点“确认约面试”）
+  const pickSlot = (slot: TimeSlot) => {
+    setManual({ date: slot.date, start_time: slot.start_time, end_time: slot.end_time });
+    toast(`已填入 ${slot.date} ${slot.start_time}-${slot.end_time}，可微调后确认`);
+  };
+
+  // 确认（优先复用 AI 已建面试记录避免残留；否则走手动直排接口）
+  const confirmManual = async () => {
+    if (!schedCid) { toast("请选择候选人", "err"); return; }
+    if (!manual.date || !manual.start_time || !manual.end_time) { toast("请填写面试日期和时间段", "err"); return; }
+    if (manual.end_time <= manual.start_time) { toast("结束时间需晚于开始时间", "err"); return; }
     setBusy(true);
     try {
-      await api.interviews.confirmSlot({
-        interview_id: interviewId,
-        selected_slot: slot,
-        location: "线上会议",
-      });
-      toast("面试时间已确认");
-      setOpen(false); setSlots([]); setInterviewId(null);
+      const slot = { date: manual.date, start_time: manual.start_time, end_time: manual.end_time };
+      if (interviewId != null) {
+        await api.interviews.confirmSlot({
+          interview_id: interviewId,
+          selected_slot: slot,
+          location: "线上会议",
+        });
+      } else {
+        await api.interviews.manual({
+          candidate_id: schedCid,
+          interviewers: parseInterviewers(),
+          date: manual.date,
+          start_time: manual.start_time,
+          end_time: manual.end_time,
+          location: "线上会议",
+        });
+      }
+      toast("面试时间已安排");
+      setOpen(false);
+      resetSchedForm();
       loadCalendar();
     } catch (e) { toast(errDetail(e), "err"); }
     finally { setBusy(false); }
@@ -274,7 +306,7 @@ export default function Interviews() {
                 ))}
               </Select>
             </div>
-            <Button onClick={() => openSched(null)}><CalendarPlus size={14} /> AI 排期</Button>
+            <Button onClick={() => openSched(null)}><CalendarPlus size={14} /> 约面试</Button>
           </div>
         }
       />
@@ -465,8 +497,8 @@ export default function Interviews() {
         )}
       </Modal>
 
-      {/* AI 排期弹窗 */}
-      <Modal open={open} onClose={() => setOpen(false)} title="AI 智能排期" width="max-w-xl">
+      {/* 约面试弹窗（手动为主，AI 推荐为辅） */}
+      <Modal open={open} onClose={() => setOpen(false)} title="约面试" width="max-w-2xl">
         <Field label="候选人 *">
           <Select value={schedCid ?? ""} onChange={(e) => setSchedCid(e.target.value ? Number(e.target.value) : null)}>
             <option value="">选择候选人…</option>
@@ -478,29 +510,51 @@ export default function Interviews() {
         <Field label="面试官（逗号分隔）">
           <Input value={form.interviewers} onChange={(e) => setForm({ ...form, interviewers: e.target.value })} />
         </Field>
-        <div className="grid grid-cols-2 gap-4">
-          <Field label="开始日期"><Input type="date" value={form.start} onChange={(e) => setForm({ ...form, start: e.target.value })} /></Field>
-          <Field label="结束日期"><Input type="date" value={form.end} onChange={(e) => setForm({ ...form, end: e.target.value })} /></Field>
-        </div>
-        <div className="flex justify-end mt-1">
-          <Button loading={busy} onClick={genSlots}>生成推荐时间段</Button>
+
+        {/* ① 手动指定时间（主操作） */}
+        <div className="rounded-xl border border-brand-100 bg-brand-50/40 px-4 py-3.5 mt-2">
+          <p className="text-xs font-semibold text-brand-600 mb-3">① 面试时间（直接指定）</p>
+          <div className="grid grid-cols-4 gap-3">
+            <div className="col-span-2">
+              <Field label="日期"><Input type="date" value={manual.date} onChange={(e) => setManual({ ...manual, date: e.target.value })} /></Field>
+            </div>
+            <Field label="开始时间"><Input type="time" value={manual.start_time} onChange={(e) => setManual({ ...manual, start_time: e.target.value })} /></Field>
+            <Field label="结束时间"><Input type="time" value={manual.end_time} onChange={(e) => setManual({ ...manual, end_time: e.target.value })} /></Field>
+          </div>
+          <div className="flex justify-end mt-3">
+            <Button loading={busy} onClick={confirmManual}>确认约面试</Button>
+          </div>
         </div>
 
-        {slots.length > 0 && (
-          <div className="mt-5 border-t border-slate-100 pt-4">
-            <p className="text-xs font-medium text-slate-500 mb-2.5">确认一个时间段（将通知候选人）：</p>
-            <div className="grid grid-cols-3 gap-2">
-              {slots.map((s, i) => (
-                <button key={i} disabled={busy}
-                  onClick={() => confirmSlot(s)}
-                  className="rounded-xl border border-slate-200 p-3 text-center hover:border-brand-500 hover:bg-brand-50 transition-colors disabled:opacity-50">
-                  <p className="text-sm font-medium text-slate-800">{s.date}</p>
-                  <p className="text-xs text-brand-600 mt-1 tabular-nums">{s.start_time} – {s.end_time}</p>
-                </button>
-              ))}
-            </div>
+        {/* ② AI 辅助（可选，仅作推荐参考） */}
+        <div className="mt-5 border-t border-slate-100 pt-4">
+          <p className="text-xs font-medium text-slate-400 mb-3">
+            ② AI 辅助（可选）：不确定哪天方便？选一个可安排日期范围生成推荐时段，点选会自动填入上方“①”，可再微调后确认。
+          </p>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="可安排日期（起）"><Input type="date" value={form.start} onChange={(e) => setForm({ ...form, start: e.target.value })} /></Field>
+            <Field label="可安排日期（止）"><Input type="date" value={form.end} onChange={(e) => setForm({ ...form, end: e.target.value })} /></Field>
           </div>
-        )}
+          <div className="flex justify-end mt-1">
+            <Button variant="outline" loading={busy} onClick={genSlots}>生成推荐时段</Button>
+          </div>
+
+          {slots.length > 0 && (
+            <div className="mt-4">
+              <div className="grid grid-cols-3 gap-2">
+                {slots.map((s, i) => (
+                  <button key={i} disabled={busy}
+                    onClick={() => pickSlot(s)}
+                    className="rounded-xl border border-slate-200 p-3 text-center hover:border-brand-500 hover:bg-brand-50 transition-colors disabled:opacity-50">
+                    <p className="text-sm font-medium text-slate-800">{s.date}</p>
+                    <p className="text-xs text-brand-600 mt-1 tabular-nums">{s.start_time} – {s.end_time}</p>
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-slate-400 mt-2">点击某个时段自动填入上方时间，确认前可自由修改。</p>
+            </div>
+          )}
+        </div>
       </Modal>
 
       {/* 反馈弹窗 */}

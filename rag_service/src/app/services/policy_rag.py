@@ -123,7 +123,7 @@ class PolicyRAGAgent:
             schema = self._milvus_client.create_schema(auto_id=False, enable_dynamic_field=True)
             schema.add_field(field_name="id", datatype=DataType.VARCHAR, is_primary=True, max_length=100)
             schema.add_field(field_name="text", datatype=DataType.VARCHAR, max_length=65535)
-            schema.add_field(field_name="dense_vector", datatype=DataType.FLOAT16_VECTOR, dim=768)
+            schema.add_field(field_name="dense_vector", datatype=DataType.FLOAT16_VECTOR, dim=1024)
             schema.add_field(field_name="sparse_vector", datatype=DataType.SPARSE_FLOAT_VECTOR)
             schema.add_field(field_name="parent_id", datatype=DataType.VARCHAR, max_length=100)
             schema.add_field(field_name="parent_content", datatype=DataType.VARCHAR, max_length=65535)
@@ -234,12 +234,14 @@ class PolicyRAGAgent:
         data = []
         for i, chunk in enumerate(chunks):
             text_hash = hashlib.md5(texts[i].encode("utf-8")).hexdigest()
+            doc_id = chunk.metadata.get("doc_id", -1)
             sparse_vec = {}
             row = embeddings["sparse"][i]
             for idx, val in zip(row.col, row.data):
                 sparse_vec[int(idx)] = float(val)
             data.append({
-                "id": text_hash,
+                # 主键必须带上 doc_id 与序号：不同文档即使正文相同，也不能互相覆盖
+                "id": f"d{doc_id}_{i}_{text_hash[:16]}",
                 "text": texts[i],
                 "dense_vector": embeddings["dense"][i].astype(np.float16),
                 "sparse_vector": sparse_vec,
@@ -247,7 +249,7 @@ class PolicyRAGAgent:
                 "parent_content": chunk.metadata.get("parent_content", ""),
                 "title": chunk.metadata.get("title", ""),
                 "category": chunk.metadata.get("category", ""),
-                "doc_id": chunk.metadata.get("doc_id", -1),
+                "doc_id": doc_id,
             })
         return data
 
@@ -272,6 +274,20 @@ class PolicyRAGAgent:
                 indexed_count += 1
         logger.info(f"全部重新索引完成: {indexed_count} 文档")
         return {"reindexed": indexed_count}
+
+    async def remove_from_milvus(self, doc_id: int):
+        """按 doc_id 删除 Milvus 中该文档的全部分块（删除文档时级联清理，避免 RAG 引用已删内容）
+
+        只初始化 Milvus 客户端（不加载嵌入/重排序模型），适合删除场景。
+        """
+        if self._milvus_client is None:
+            self._init_milvus()
+        res = self._milvus_client.delete(
+            collection_name=self._collection_name,
+            filter=f"doc_id in [{doc_id}]",
+        )
+        logger.info(f"已从 Milvus 清除 doc_id={doc_id}: {res}")
+        return res
 
     # ================================================================
     # 检索（混合检索 + 重排序）

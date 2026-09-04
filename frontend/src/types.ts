@@ -52,6 +52,24 @@ export interface ResumeUploadResponse {
   message?: string;
 }
 
+export interface ResumeBasicPreview {
+  name: string;
+  phone: string;
+  email: string;
+  location: string;
+  experience_years?: number | null;
+  suggested_position: string;
+  skills: string[];
+}
+
+export interface ResumeQuickAddResponse {
+  candidate_id: number;
+  candidate_name: string;
+  resume_id: number;
+  status: string;
+  warning?: string | null;
+}
+
 export interface ResumeAnalysis {
   id: number;
   candidate_id: number;
@@ -189,15 +207,37 @@ export interface ExamAnalysisItem {
   id: number;
   candidate_name: string;
   candidate_phone?: string | null;
+  candidate_position?: string | null;
+  external_id?: string | null;
   exam_title: string;
   exam_score?: number | null;
   exam_total?: number | null;
   exam_duration?: number | null;
   analysis_status: string;
   analysis_result?: Record<string, unknown> | null;
+  raw_data?: { eventBody?: unknown; answerDetail?: ExamAnswerDetail } | null;
   error_message?: string | null;
   created_at: string;
   analyzed_at?: string | null;
+}
+
+/** 试卷逐题作答明细（来自 Workmenul answerDetail） */
+export interface ExamAnswerQuestion {
+  questionContent?: string;
+  questionType?: string;
+  options?: Record<string, string> | null;
+  score?: number | null;
+  rightAnswers?: string | string[] | null;
+  userAnswer?: string | null;
+  realScore?: number | null;
+  isCorrect?: boolean | null;
+}
+
+export interface ExamAnswerDetail {
+  totalQuestions?: number;
+  correctCount?: number;
+  wrongCount?: number;
+  questions?: ExamAnswerQuestion[];
 }
 
 // ===== 评分优化（原 LLM 监控栏） =====
@@ -277,3 +317,17 @@ export const STATUS_META: Record<CandidateStatus, { label: string; cls: string }
 
 export const statusMeta = (s: string) =>
   STATUS_META[s as CandidateStatus] ?? { label: s, cls: "bg-slate-100 text-slate-600" };
+
+// ===== 制度问答：账号会话历史（后端 /api/policy） =====
+export interface PolicyChatSession {
+  session_id: string;
+  title: string;
+  last_preview: string;
+  count: number;
+}
+
+export interface PolicyChatMessage {
+  role: "user" | "assistant";
+  content: string;
+  created_at?: string;
+}

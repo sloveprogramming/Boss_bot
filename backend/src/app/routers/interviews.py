@@ -12,6 +12,7 @@ from app.services import scheduler
 from app.schemas import (
     InterviewSlotRequest, InterviewSlotResponse,
     SlotConfirm, InterviewResponse, InterviewFeedback,
+    ManualScheduleRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -88,6 +89,48 @@ async def confirm_slot(data: SlotConfirm, db: AsyncSession = Depends(get_db)):
         )
     except ValueError as e:
         logger.warning("确认面试时段失败: interview_id=%s error=%s", data.interview_id, e)
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/manual", response_model=InterviewResponse)
+async def manual_schedule(data: ManualScheduleRequest,
+                          db: AsyncSession = Depends(get_db)):
+    """HR 手动指定面试时间直接排期（不依赖 AI 生成时段）"""
+    try:
+        interview = await scheduler.schedule_manual(
+            candidate_id=data.candidate_id,
+            interviewers=data.interviewers,
+            round_name=data.round,
+            date=data.date,
+            start_time=data.start_time,
+            end_time=data.end_time,
+            location=data.location,
+            meeting_link=data.meeting_link,
+            db=db,
+        )
+        cand_result = await db.execute(
+            select(Candidate).where(Candidate.id == interview.candidate_id)
+        )
+        candidate = cand_result.scalar_one_or_none()
+        logger.info(
+            "手动排期面试: interview_id=%s candidate_id=%s 时间=%s %s-%s",
+            interview.id, interview.candidate_id,
+            data.date, data.start_time, data.end_time,
+        )
+        return InterviewResponse(
+            id=interview.id,
+            candidate_id=interview.candidate_id,
+            candidate_name=candidate.name if candidate else "",
+            round=interview.round,
+            status=interview.status,
+            interviewers=interview.interviewers or [],
+            confirmed_start=interview.confirmed_start,
+            confirmed_end=interview.confirmed_end,
+            location=interview.location,
+            meeting_link=interview.meeting_link,
+        )
+    except ValueError as e:
+        logger.warning("手动排期面试失败: candidate_id=%s error=%s", data.candidate_id, e)
         raise HTTPException(status_code=400, detail=str(e))
 
 

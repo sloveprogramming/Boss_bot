@@ -43,12 +43,19 @@ async def lifespan(app: FastAPI):
     task_runner = ScheduledTasks(async_session_factory)
     asyncio.create_task(task_runner.start(interval_seconds=300))
     logger.info("[%s] 定时任务已启动（间隔300s）", settings.APP_NAME)
+
+    # 后台周期拉取 Workmenul 答卷 → 试卷分析（默认 60s，配置 WORKMENUL_API_BASE 后生效）
+    from app.services.workmenul_sync import exam_sync_loop
+    exam_sync_task = asyncio.create_task(
+        exam_sync_loop(settings.EXAM_SYNC_INTERVAL_SECONDS)
+    )
     logger.info("[%s] 启动完成", settings.APP_NAME)
 
     yield
 
     # ==== 关闭阶段 ====
     task_runner.stop()
+    exam_sync_task.cancel()
     logger.info("[%s] 定时任务已停止", settings.APP_NAME)
     logger.info("[%s] 应用关闭", settings.APP_NAME)
 

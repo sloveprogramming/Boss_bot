@@ -31,6 +31,7 @@ class PolicyChatHistory(Base):
     # 主键
     id = Column(Integer, primary_key=True, autoincrement=True)
     session_id = Column(String(100), nullable=False, index=True)  # 会话ID，用于关联同一对话
+    username = Column(String(100), nullable=True, index=True)     # 所属账号（按此隔离会话历史，主后端持久化用）
     role = Column(String(20), nullable=False)                      # 角色：user(用户) 或 assistant(AI)
     content = Column(Text, nullable=False)                         # 消息内容
 

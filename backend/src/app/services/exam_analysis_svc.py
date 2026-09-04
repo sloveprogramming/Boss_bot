@@ -160,6 +160,7 @@ class ExamAnalysisService:
 
         record.candidate_name = payload.get("candidate_name") or "未知考生"
         record.candidate_phone = payload.get("candidate_phone")
+        record.candidate_position = payload.get("candidate_position")
         record.exam_title = payload.get("exam_title") or "未命名测评"
         record.exam_score = payload.get("exam_score")
         record.exam_total = payload.get("exam_total")

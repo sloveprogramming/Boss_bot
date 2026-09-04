@@ -4,6 +4,8 @@ from app.agents.tracing import trace_llm_call, set_trace_db_session
 from app.agents.prompts import (
     RESUME_ANALYSIS_SYSTEM,
     RESUME_ANALYSIS_PROMPT,
+    RESUME_BASIC_PREVIEW_SYSTEM,
+    RESUME_BASIC_PREVIEW_PROMPT,
 )
 
 __all__ = [
@@ -13,4 +15,5 @@ __all__ = [
     "trace_llm_call", "set_trace_db_session",
     # 提示词
     "RESUME_ANALYSIS_SYSTEM", "RESUME_ANALYSIS_PROMPT",
+    "RESUME_BASIC_PREVIEW_SYSTEM", "RESUME_BASIC_PREVIEW_PROMPT",
 ]
