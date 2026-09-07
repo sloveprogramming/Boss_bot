@@ -12,12 +12,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models import Notification
 from app.services.notification_template_svc import resolve_template, render_text
+import logging
 import httpx
 import time
 import hmac
 import hashlib
 import base64
 from urllib.parse import quote_plus
+
+logger = logging.getLogger(__name__)
 
 
 class NotificationService:
@@ -208,11 +211,44 @@ class NotificationService:
         msg["To"] = to
         html_body = body.replace("\n", "<br>")
         msg.attach(MIMEText(html_body, "html", "utf-8"))
-        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
-            if settings.SMTP_USER:
-                server.starttls()
-                server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-            server.sendmail(settings.NOTIFICATION_EMAIL_FROM, [to], msg.as_string())
+
+        host = settings.SMTP_HOST
+        # 阿里云 ECS 默认封 25 出站；网易/QQ 等常用 465(SSL)/587(STARTTLS)。
+        # 依次尝试「配置端口 → 465 → 587 → 25」，首个连通即发送；单次 15s 超时防假死。
+        attempts: list[tuple[int, bool]] = []
+        for port, use_ssl in [
+            (int(settings.SMTP_PORT or 25), int(settings.SMTP_PORT or 25) == 465),
+            (465, True),
+            (587, False),
+            (25, False),
+        ]:
+            if (port, use_ssl) not in attempts:
+                attempts.append((port, use_ssl))
+
+        last_err: Exception | None = None
+        for port, use_ssl in attempts:
+            try:
+                if use_ssl:
+                    server = smtplib.SMTP_SSL(host, port, timeout=15)
+                else:
+                    server = smtplib.SMTP(host, port, timeout=15)
+                with server:
+                    server.ehlo()
+                    if not use_ssl:
+                        try:
+                            server.starttls()
+                            server.ehlo()
+                        except smtplib.SMTPException:
+                            pass  # 服务器不支持 STARTTLS 时继续
+                    if settings.SMTP_USER and settings.SMTP_PASSWORD:
+                        server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+                    server.sendmail(settings.NOTIFICATION_EMAIL_FROM, [to], msg.as_string())
+                logger.info("邮件发送成功 host=%s port=%d to=%s", host, port, to)
+                return
+            except Exception as e:  # noqa: BLE001 —— 逐个端口尝试，全部失败抛最后一个
+                last_err = e
+                logger.warning("SMTP %s:%d 尝试失败: %s", host, port, e)
+        raise last_err or RuntimeError(f"SMTP 发送失败: {host}")
 
     async def _send_sms(self, to: str, body: str):
         if not settings.TWILIO_ACCOUNT_SID:

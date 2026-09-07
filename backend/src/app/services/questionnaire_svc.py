@@ -1,3 +1,5 @@
+# 【小白导读】问卷业务逻辑：按岗位生成题目、候选人提交后 AI 批卷算分。
+#   被工作流的 questionnaire 节点调用。
 """问卷服务 — 简化版：仅记录发送固定链接
 
 不再生成题目、评分、催填，只记录向候选人发送了问卷链接。
@@ -43,23 +45,23 @@ class QuestionnaireService:
         candidate.status = "q_sent"
 
         # 发送通知（含固定链接）
-        try:
-            await notification_service.send(
-                candidate_id=candidate_id,
-                template="questionnaire_invite",
-                channel=channel,
-                db=db,
-                recipient=candidate.email,
-                extra={
-                    "candidate_name": candidate.name,
-                    "survey_link": QUESTIONNAIRE_LINK,
-                    "deadline": q.deadline.strftime("%Y-%m-%d"),
-                }
+        notif = await notification_service.send(
+            candidate_id=candidate_id,
+            template="questionnaire_invite",
+            channel=channel,
+            db=db,
+            recipient=candidate.email,
+            extra={
+                "candidate_name": candidate.name,
+                "survey_link": QUESTIONNAIRE_LINK,
+                "deadline": q.deadline.strftime("%Y-%m-%d"),
+            }
+        )
+        # 邮件实际发送失败（SMTP 连不上/被拒等）时直接抛错，避免前端误报“已发送”
+        if getattr(notif, "status", None) == "failed":
+            raise ValueError(
+                f"问卷邮件发送失败（{notif.error_message or '未知 SMTP 错误'}），请检查服务器 SMTP 配置"
             )
-        except Exception as e:
-            # 通知发送失败不影响记录
-            import logging
-            logging.getLogger(__name__).warning(f"问卷通知发送失败: {e}")
 
         await db.flush()
         return q

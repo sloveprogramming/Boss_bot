@@ -1,3 +1,10 @@
+# ═══════════════════════════════════════════════════════════════
+# 【小白导读】后端的"设置面板"——整个项目所有可调参数都集中在这里。
+#   · 读取顺序：代码里写的默认值 → 项目根目录 .env 文件中的同名变量（后者覆盖前者）
+#   · 使用方式：其他文件写 `from app.config import settings`，然后 settings.XXX 取值
+#     （settings 是文件末尾创建的全局唯一实例，全项目共用）
+#   · 好处：换数据库、换 LLM Key、调分流阈值都只改 .env，不动代码
+# ═══════════════════════════════════════════════════════════════
 """应用配置 — 使用Pydantic Settings从项目根目录的.env文件加载"""
 import os
 from pathlib import Path
@@ -85,6 +92,8 @@ class Settings(BaseSettings):
     SMTP_USER: Optional[str] = None       # SMTP用户名
     SMTP_PASSWORD: Optional[str] = None   # SMTP密码
     NOTIFICATION_EMAIL_FROM: str = "noreply@recruitai.com"  # 发件人地址
+    # 候选人邮件内嵌链接使用的前端公网地址（如 http://121.41.122.88）。留空则邮件链接回退 http://localhost:5173（仅本地联调用）
+    PUBLIC_BASE_URL: str = ""
 
     # Twilio短信配置
     TWILIO_ACCOUNT_SID: Optional[str] = None

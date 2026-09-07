@@ -1,3 +1,8 @@
+# ═══════════════════════════════════════════════════════════════
+# 【小白导读】候选人管理：增删改查 + 导出 Excel。
+#   · 列表查询会用 dependencies/scope.py 做数据权限过滤（HR 只看到自己的候选人）。
+#   · 候选人状态的其他变更入口在工作流/面试/问卷模块，这里只是手工管理入口。
+# ═══════════════════════════════════════════════════════════════
 """候选人管理API — CRUD操作"""
 import logging
 from datetime import datetime
@@ -9,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from openpyxl import Workbook
 from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models import Candidate, User
@@ -264,61 +269,52 @@ async def delete_candidate(
     current_user: User = Depends(get_current_user),
 ):
     """删除候选人及其所有关联记录"""
-    from app.models import Resume, Questionnaire, QuestionnaireResponse, Interview, Notification, TalentPool
+    from app.models import (
+        Resume, Questionnaire, QuestionnaireResponse, Interview, Notification,
+        TalentPool, TaskProgress,
+    )
 
     candidate = await ensure_candidate_visible(db, current_user, candidate_id)
 
-    # 按依赖顺序删除关联记录
-    # 1. 问卷回复
+    # 显式按外键依赖顺序清理（每条 delete/update 立即执行），最后删候选人本身。
+    # 之前依赖 SQLAlchemy ORM 一次性 flush 会自动排序，但缺少 relationship 时可能与
+    # MySQL 外键顺序不一致 → 删除候选人先于其子表被 MySQL 拒绝（1451）。
+    # 1. 任务进度（auto-process 流水；candidate_id NOT NULL 引用 candidates）
     await db.execute(
-        select(QuestionnaireResponse).where(QuestionnaireResponse.candidate_id == candidate_id)
+        delete(TaskProgress).where(TaskProgress.candidate_id == candidate_id)
     )
-    responses = (await db.execute(
-        select(QuestionnaireResponse).where(QuestionnaireResponse.candidate_id == candidate_id)
-    )).scalars().all()
-    for r in responses:
-        await db.delete(r)
-
-    # 2. 问卷
-    qs = (await db.execute(
-        select(Questionnaire).where(Questionnaire.candidate_id == candidate_id)
-    )).scalars().all()
-    for q in qs:
-        await db.delete(q)
-
-    # 3. 面试记录
-    interviews = (await db.execute(
-        select(Interview).where(Interview.candidate_id == candidate_id)
-    )).scalars().all()
-    for i in interviews:
-        await db.delete(i)
-
-    # 4. 简历
-    resumes = (await db.execute(
-        select(Resume).where(Resume.candidate_id == candidate_id)
-    )).scalars().all()
-    for r in resumes:
-        await db.delete(r)
-
-    # 5. 通知记录（解除关联）
-    notifs = (await db.execute(
-        select(Notification).where(Notification.candidate_id == candidate_id)
-    )).scalars().all()
-    for n in notifs:
-        n.candidate_id = None
-
+    # 2. 面试记录（candidate_id NOT NULL 引用 candidates）——此前“面试候选人删不掉”的元凶
+    await db.execute(
+        delete(Interview).where(Interview.candidate_id == candidate_id)
+    )
+    # 3. 简历
+    await db.execute(
+        delete(Resume).where(Resume.candidate_id == candidate_id)
+    )
+    # 4. 问卷回复 + 问卷
+    await db.execute(
+        delete(QuestionnaireResponse).where(QuestionnaireResponse.candidate_id == candidate_id)
+    )
+    await db.execute(
+        delete(Questionnaire).where(Questionnaire.candidate_id == candidate_id)
+    )
+    # 5. 通知记录：解除外键（candidate_id 可空 → 置 NULL 保留历史发送记录）
+    await db.execute(
+        update(Notification)
+        .where(Notification.candidate_id == candidate_id)
+        .values(candidate_id=None)
+    )
     # 6. 人才池记录
     pools = (await db.execute(
         select(TalentPool).where(TalentPool.candidate_id == candidate_id)
     )).scalars().all()
     for p in pools:
         await db.delete(p)
-
-    # 7. 最后删除候选人
+    # 7. 候选人本身
     await db.delete(candidate)
     await db.flush()
     logger.info(
-        "删除候选人: id=%s name=%s (级联清理问卷/面试/简历/人才池)",
+        "删除候选人: id=%s name=%s (显式级联清理任务进度/问卷/面试/简历/人才池)",
         candidate_id, candidate.name,
     )
     return {"status": "deleted"}

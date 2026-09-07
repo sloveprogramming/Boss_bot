@@ -1,3 +1,7 @@
+# ═══════════════════════════════════════════════════════════════
+# 【小白导读】面试管理：AI 生成可选时段 → 候选人确认 → 手动排期 → 提交反馈
+#   → 月历查询 → 取消。发通知走 services/notification.py，写日历走 calendar_svc.py。
+# ═══════════════════════════════════════════════════════════════
 """面试排期API — 时间段生成、确认、反馈提交"""
 import logging
 from datetime import datetime, timedelta
@@ -87,6 +91,31 @@ async def confirm_slot(
             interview.id, interview.candidate_id,
             interview.confirmed_start,
         )
+
+        # 邮件告知候选人面试已确认（确认成功后才补发；发信失败仅记录，不阻塞确认）
+        try:
+            from app.services.notification import notification_service
+            interview_time = ""
+            if interview.confirmed_start:
+                interview_time = interview.confirmed_start.strftime("%Y-%m-%d %H:%M")
+                if interview.confirmed_end:
+                    interview_time += f" ~ {interview.confirmed_end.strftime('%H:%M')}"
+            await notification_service.send(
+                candidate_id=interview.candidate_id,
+                template="interview_confirmed",
+                channel="email",
+                db=db,
+                recipient=candidate.email if candidate else None,
+                extra={
+                    "candidate_name": candidate.name if candidate else "候选人",
+                    "position": candidate.position if candidate else "",
+                    "interview_time": interview_time,
+                    "location_or_link": interview.location or interview.meeting_link or "",
+                },
+            )
+        except Exception as e:
+            logger.warning("面试确认邮件发送失败: interview_id=%s error=%s", interview.id, e)
+
         return InterviewResponse(
             id=interview.id,
             candidate_id=interview.candidate_id,

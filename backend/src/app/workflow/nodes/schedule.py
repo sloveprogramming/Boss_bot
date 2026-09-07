@@ -1,3 +1,5 @@
+# 【小白导读】面试三节点：schedule（AI 生成可选时段+发邀请）→
+#   confirm（候选人选定时间后锁定）→ complete（标记完成，触发后续评审）。
 """面试排期节点 — 生成时间段/确认/完成
 
 合并了旧系统中：
@@ -6,6 +8,7 @@
 """
 import logging
 from ..state import RecruitmentState
+from app.config import settings
 from app.database import async_session_factory
 from app.services import scheduler, notification_service
 from datetime import date, timedelta
@@ -45,6 +48,7 @@ async def schedule_interview_node(state: RecruitmentState) -> dict:
                     f"  {s['date']} {s['start_time']}-{s['end_time']}"
                     for s in slots.get("proposed_slots", [])
                 )
+                front_base = (settings.PUBLIC_BASE_URL or "http://localhost:5173").rstrip("/")
                 await notification_service.send(
                     candidate_id=candidate_id,
                     template="interview_invite",
@@ -53,7 +57,7 @@ async def schedule_interview_node(state: RecruitmentState) -> dict:
                     extra={
                         "candidate_name": candidate_name,
                         "proposed_slots": proposed_text,
-                        "selection_link": f"http://localhost:5173/interview/{slots.get('interview_id', '')}",
+                        "selection_link": f"{front_base}/interview/{slots.get('interview_id', '')}",
                     },
                 )
                 logger.info(
