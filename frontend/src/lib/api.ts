@@ -64,8 +64,9 @@ export async function postSSE(
   url: string,
   body: Record<string, unknown>,
   onDelta: (text: string) => void,
+  direct = false, // true: 直连主后端（不做 /rag-api 映射）
 ): Promise<string> {
-  const full = ragUrl(url); // /api/chat/... → RAG 服务
+  const full = direct ? url : ragUrl(url); // /api/chat/... → RAG 服务
   const res = await fetch(full, {
     method: "POST",
     headers: {
@@ -201,6 +202,10 @@ export const api = {
   },
   rag: {
     stream: "/api/chat/stream", // 仅给 postSSE 映射 RAG 服务；历史改由主后端 policyChat 持久化
+  },
+  // 统一智能助手：主后端 Function Calling（ReAct 多轮工具循环，含制度 RAG 工具）
+  assistant: {
+    stream: "/api/workflow/function-call/stream",
   },
   policyChat: {
     sessions: () => http.get<{ sessions: PolicyChatSession[] }>("/api/policy/sessions"),

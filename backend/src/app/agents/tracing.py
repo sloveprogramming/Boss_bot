@@ -20,6 +20,33 @@ from typing import Optional, Callable
 
 logger = logging.getLogger(__name__)
 
+# ===== Langfuse（可选）— 未配置时自动跳过，零侵入 =====
+_langfuse_client = None
+_langfuse_checked = False
+
+
+def _get_langfuse():
+    """懒加载 Langfuse 客户端；未启用或导入失败返回 None（只尝试一次，避免重复报错）"""
+    global _langfuse_client, _langfuse_checked
+    if _langfuse_checked:
+        return _langfuse_client
+    _langfuse_checked = True
+    try:
+        from app.config import settings
+        if not settings.LANGFUSE_ENABLED:
+            return None
+        from langfuse import Langfuse
+        _langfuse_client = Langfuse(
+            public_key=settings.LANGFUSE_PUBLIC_KEY,
+            secret_key=settings.LANGFUSE_SECRET_KEY,
+            host=settings.LANGFUSE_HOST,
+        )
+        logger.info("Langfuse 已启用: %s", settings.LANGFUSE_HOST)
+    except Exception as e:
+        logger.warning("Langfuse 初始化失败（本次运行不再尝试）: %s", e)
+        _langfuse_client = None
+    return _langfuse_client
+
 # 保存异步 DB 会话的上下文变量（由 middleware 或调用方设置）
 _trace_db_session = None
 
@@ -58,6 +85,34 @@ async def _write_log_async(function_name: str, model: str,
             )
             db.add(log)
             await db.commit()
+        # Langfuse 追踪上报（可选，失败不影响主流程）
+        # v3 SDK 手动埋点：start_span 建 trace → update_trace 关联会话 → start_generation 记录 LLM 调用
+        try:
+            lf = _get_langfuse()
+            if lf is not None:
+                trace_id = lf.create_trace_id()
+                span = lf.start_span(
+                    name=function_name,
+                    trace_context={"trace_id": trace_id},
+                    metadata={"model": model, "latency_ms": round(latency_ms, 2)},
+                )
+                span.update_trace(session_id=session_id, name=function_name)
+                gen = span.start_generation(
+                    name=function_name,
+                    model=model,
+                    input={"system": system_prompt, "messages": messages},
+                    output=response,
+                    usage_details={
+                        "input": prompt_tokens,
+                        "output": completion_tokens,
+                        "total": total_tokens,
+                    },
+                )
+                gen.end()
+                span.end()
+                lf.flush()
+        except Exception as lf_err:
+            logger.debug("Langfuse 导出失败（非关键）: %s", lf_err)
     except Exception as e:
         # 日志写入失败不影响主流程
         logger.warning(f"LLM trace 写入失败（非关键）: {e}")

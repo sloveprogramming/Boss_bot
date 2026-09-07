@@ -91,7 +91,7 @@ async def request_logging_middleware(request: Request, call_next):
     return response
 
 # ===== 注册所有API路由 =====
-from app.routers import candidates, resumes, questionnaires, interviews, policy_agent, workflow, dashboard, auth, llm_observability, exam_analysis, scoring
+from app.routers import candidates, resumes, questionnaires, interviews, policy_agent, workflow, dashboard, auth, llm_observability, exam_analysis, scoring, jd_generator
 
 app.include_router(candidates.router)                # 候选人管理API
 app.include_router(resumes.router)                   # 简历上传与分析API
@@ -104,6 +104,7 @@ app.include_router(auth.router)                       # 认证与权限API
 app.include_router(llm_observability.router)          # LLM可观测性API
 app.include_router(exam_analysis.router)              # 试卷分析API
 app.include_router(scoring.router)                    # 评分优化API
+app.include_router(jd_generator.router)               # JD生成API
 
 
 @app.get("/api/health")

@@ -478,6 +478,7 @@ from pydantic import BaseModel
 class FunctionCallRequest(BaseModel):
     query: str
     system_prompt: str = ""
+    session_id: Optional[str] = None      # 短期记忆会话 ID（可选）
 
 
 class FunctionCallResponse(BaseModel):
@@ -514,10 +515,18 @@ async def function_call_endpoint(data: FunctionCallRequest):
     - "查询明天的面试安排"
     """
     from app.workflow.nodes import run_function_calling
+    from app.agents.session_memory import get_history, append_message
+
+    # 短期记忆：有 session_id 时注入历史上下文（最近 N 轮）
+    history = get_history(data.session_id) if data.session_id else []
     result = await run_function_calling(
         query=data.query,
         system_prompt=data.system_prompt,
+        history=history,
     )
+    if data.session_id:
+        append_message(data.session_id, "user", data.query)
+        append_message(data.session_id, "assistant", result.get("fc_response", ""))
     return result
 
 
@@ -581,26 +590,30 @@ from app.utils import (
 
 @router.post("/function-call/stream")
 async def function_call_stream(data: FunctionCallRequest):
-    """Function Calling SSE 流式端点
+    """Function Calling SSE 流式端点（ReAct 多轮工具循环）
 
     流式输出整个 Function Calling 过程：
     1. progress: 思考阶段（正在分析查询）
-    2. progress: 工具选择（LLM 决定调用哪些工具）
-    3. tool_call: 工具调用详情
-    4. tool_result: 工具执行结果摘要
-    5. progress: 生成回复阶段
-    6. token: 逐 token 流式输出最终回复
-    7. done: 完成
+    2. 循环: LLM 决定工具 → tool_call / tool_result 事件 → 结果回填 → 再思考
+       （最多 MAX_TOOL_ROUNDS 轮，LLM 认为信息足够即停止）
+    3. token: 逐 token 流式输出最终回复
+    4. done: 完成
     """
     import json
     from app.mcp import get_tool_definitions_openai, execute_tool_directly
     from app.config import settings
     from openai import AsyncOpenAI
+    from app.agents.session_memory import get_history, append_message
+
+    MAX_TOOL_ROUNDS = 5
 
     async def generate():
         tools = get_tool_definitions_openai()
         system = data.system_prompt or FC_SYSTEM_PROMPT_STREAM
-        messages = [{"role": "user", "content": data.query}]
+
+        # 短期记忆：有 session_id 时注入该会话最近的历史消息
+        history = get_history(data.session_id) if data.session_id else []
+        messages = list(history) + [{"role": "user", "content": data.query}]
 
         # 阶段 1: 分析查询
         yield progress_event("analysis", "running", "正在分析您的查询...", 10)
@@ -610,24 +623,103 @@ async def function_call_stream(data: FunctionCallRequest):
             base_url=settings.OPENAI_BASE_URL,
         )
 
-        # 阶段 2: LLM 决定工具
-        yield progress_event("tool_selection", "running", "AI 正在选择合适的工具...", 25)
+        tool_call_records = []
+        used_tools = False
+        final_text = ""
 
-        response = await client.chat.completions.create(
-            model=settings.OPENAI_MODEL,
-            messages=[{"role": "system", "content": system}] + messages,
-            tools=tools,
-            tool_choice="auto",
-            temperature=0.1,
-            max_tokens=4096,
-        )
+        # ===== 阶段 2: ReAct 循环 —— 调工具 → 看结果 → 决定下一步 =====
+        for round_i in range(MAX_TOOL_ROUNDS):
+            pct = min(25 + round_i * 10, 60)
+            yield progress_event(
+                "tool_selection", "running",
+                f"AI 正在思考第 {round_i + 1} 步...", pct,
+            )
 
-        choice = response.choices[0]
-        message = choice.message
+            response = await client.chat.completions.create(
+                model=settings.OPENAI_MODEL,
+                messages=[{"role": "system", "content": system}] + messages,
+                tools=tools,
+                tool_choice="auto",
+                temperature=0.1,
+                max_tokens=4096,
+            )
 
-        if not message.tool_calls:
-            # 无工具调用，直接流式输出回复
-            yield progress_event("generating", "running", "正在生成回复...", 50)
+            message = response.choices[0].message
+
+            # LLM 认为信息足够 → 跳出循环，生成最终回复
+            if not message.tool_calls:
+                break
+
+            used_tools = True
+
+            # 把本轮 assistant 的工具调用决策追加进上下文
+            messages.append({
+                "role": "assistant",
+                "content": message.content or "",
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments,
+                        },
+                    }
+                    for tc in message.tool_calls
+                ],
+            })
+
+            # 执行本轮每个工具调用
+            for i, tc in enumerate(message.tool_calls):
+                yield progress_event(
+                    f"executing_{tc.function.name}", "running",
+                    f"正在执行: {tc.function.name}...", min(pct + 5 + i * 5, 65),
+                )
+
+                try:
+                    func_args = json.loads(tc.function.arguments)
+                except json.JSONDecodeError:
+                    logger.warning("工具 %s 参数 JSON 解析失败，使用空参数: %s",
+                                   tc.function.name, tc.function.arguments)
+                    func_args = {}
+
+                result = await execute_tool_directly(tc.function.name, func_args)
+
+                tool_call_records.append({
+                    "id": tc.id,
+                    "name": tc.function.name,
+                    "arguments": func_args,
+                })
+
+                # 发送工具调用事件
+                yield sse_event("tool_call", {
+                    "name": tc.function.name,
+                    "arguments": func_args,
+                })
+                yield sse_event("tool_result", {
+                    "tool": tc.function.name,
+                    "summary": result[:300] + ("..." if len(result) > 300 else ""),
+                })
+
+                # 工具结果回填进对话，供下一轮 LLM 使用
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": result,
+                })
+        else:
+            logger.warning("Function Calling 达到最大工具轮数 %d，强制生成最终回复", MAX_TOOL_ROUNDS)
+
+        # ===== 阶段 3: 最终回复，逐 token 流式输出 =====
+        yield progress_event("generating", "running", "正在生成回复...", 75)
+
+        if not used_tools:
+            # 无需工具：第一轮回复已是最终答案，直接分块流式输出（省一次 LLM 调用）
+            final_text = response.choices[0].message.content or ""
+            for i in range(0, len(final_text), 16):
+                yield token_event(final_text[i:i + 16])
+        else:
+            # 有工具结果：基于完整对话上下文流式生成最终回复
             stream_response = await client.chat.completions.create(
                 model=settings.OPENAI_MODEL,
                 messages=[{"role": "system", "content": system}] + messages,
@@ -638,85 +730,13 @@ async def function_call_stream(data: FunctionCallRequest):
             async for chunk in stream_response:
                 content = chunk.choices[0].delta.content
                 if content:
+                    final_text += content
                     yield token_event(content)
-            yield done_event("回复完成")
-            return
 
-        # 阶段 3: 执行工具
-        tool_call_records = []
-        tool_results = []
-        for i, tc in enumerate(message.tool_calls):
-            yield progress_event(
-                f"executing_{tc.function.name}", "running",
-                f"正在执行: {tc.function.name}...", 40 + i * 10,
-            )
-
-            try:
-                func_args = json.loads(tc.function.arguments)
-            except json.JSONDecodeError:
-                logger.warning("工具 %s 参数 JSON 解析失败，使用空参数: %s", tc.function.name, tc.function.arguments)
-                func_args = {}
-
-            result = await execute_tool_directly(tc.function.name, func_args)
-
-            tool_call_records.append({
-                "id": tc.id,
-                "name": tc.function.name,
-                "arguments": func_args,
-            })
-
-            # 发送工具调用事件
-            yield sse_event("tool_call", {
-                "name": tc.function.name,
-                "arguments": func_args,
-            })
-            yield sse_event("tool_result", {
-                "tool": tc.function.name,
-                "summary": result[:300] + ("..." if len(result) > 300 else ""),
-            })
-
-            tool_results.append({
-                "tool_call_id": tc.id,
-                "role": "tool",
-                "content": result,
-            })
-
-        # 阶段 4: 基于工具结果流式生成最终回复
-        yield progress_event("generating", "running", "正在基于结果生成回复...", 70)
-
-        final_messages = [
-            {"role": "system", "content": system},
-            {"role": "user", "content": data.query},
-        ]
-        final_messages.append({
-            "role": "assistant",
-            "content": message.content,
-            "tool_calls": [
-                {
-                    "id": tc.id,
-                    "type": "function",
-                    "function": {
-                        "name": tc.function.name,
-                        "arguments": tc.function.arguments,
-                    },
-                }
-                for tc in message.tool_calls
-            ],
-        })
-        final_messages.extend(tool_results)
-
-        stream_response = await client.chat.completions.create(
-            model=settings.OPENAI_MODEL,
-            messages=final_messages,
-            temperature=0.3,
-            max_tokens=4096,
-            stream=True,
-        )
-
-        async for chunk in stream_response:
-            content = chunk.choices[0].delta.content
-            if content:
-                yield token_event(content)
+        # 短期记忆：保存本轮对话（下次同 session_id 请求可解析上下文指代）
+        if data.session_id:
+            append_message(data.session_id, "user", data.query)
+            append_message(data.session_id, "assistant", final_text)
 
         yield done_event("任务完成", {
             "tool_calls": tool_call_records,
@@ -728,7 +748,7 @@ async def function_call_stream(data: FunctionCallRequest):
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # 禁用 nginx 缓冲
+            "X-Accel-Buffering": "no",  # 禁用 nginx 缓存
         },
     )
 
@@ -738,10 +758,12 @@ FC_SYSTEM_PROMPT_STREAM = """你是 AI 招聘助手的智能调度器。你可�
 规则：
 1. 根据用户的问题，选择合适的工具
 2. 如果需要候选人信息，先查候选人列表，再查详情
-3. 如果用户问"最近"或"今天"，使用日期相关的筛选
-4. 发送邮件前，先确认候选人存在
-5. 如果用户的问题不需要工具，直接回答即可
-6. 始终返回清晰、结构化的中文回复"""
+3. 制度/规章类问题（年假、试用期、报销、考勤、加班、福利、入离职等）必须调用 query_policy_docs 工具查询知识库；若工具返回 error，向用户说明制度知识库服务暂不可用
+4. 如果用户问"最近"或"今天"，使用日期相关的筛选
+5. 发送邮件前，先确认候选人存在
+6. 如果用户的问题不需要工具，直接回答即可
+7. 回答制度问题时，如工具结果包含 cited_sources，在回复末尾附上引用的文档名
+8. 始终返回清晰、结构化的中文回复"""
 
 
 @router.post("/start/{candidate_id}/stream")

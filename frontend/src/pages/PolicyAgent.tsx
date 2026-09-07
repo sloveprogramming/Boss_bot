@@ -115,19 +115,19 @@ export default function PolicyAgent() {
 
     let full = "";
     try {
-      await postSSE(api.rag.stream, { message: q, session_id: sid }, (t) => {
+      await postSSE(api.assistant.stream, { query: q, session_id: sid }, (t) => {
         full = t;
         setMsgs((m) => {
           const copy = [...m];
           copy[copy.length - 1] = { role: "assistant", content: t };
           return copy;
         });
-      });
+      }, true);
     } catch (e) {
       toast(errDetail(e), "err");
       setMsgs((m) => {
         const copy = [...m];
-        copy[copy.length - 1].content ||= "抱歉，回答生成失败，请确认 RAG 服务 (:18003) 已启动。";
+        copy[copy.length - 1].content ||= "抱歉，回答生成失败，请确认后端服务 (:18000) 与 RAG 服务 (:18003) 已启动。";
         return copy;
       });
     } finally {
@@ -172,8 +172,8 @@ export default function PolicyAgent() {
   return (
     <>
       <PageHeader
-        title="制度问答"
-        desc="RAG 知识库问答：混合检索 + 重排 + 流式回答（会话按账号隔离、服务端持久化）"
+        title="智能助手"
+        desc="统一 AI 助手：制度问答（RAG 检索）+ 招聘数据查询与操作（Function Calling 多轮工具循环）"
         actions={
           <div className="flex items-center gap-2">
             <Button variant="outline" onClick={() => setUploadOpen(true)}><Upload size={14} /> 上传制度文档</Button>

@@ -19,6 +19,7 @@ openai>=2.45.0             # OpenAI ????
 langgraph>=1.2.0           # ????????
 langchain-text-splitters>=1.1.0
 pymilvus>=2.6.0,<3.0       # ????????
+langfuse>=3.0.0,<4.0.0      # LLM 可观测性（Langfuse trace 上报，未配置自动跳过）
 mcp>=1.28.0,<2.0              # MCP 协议（1.x 装饰器 API，2.x 不兼容）????
 
 # ===== ???? =====

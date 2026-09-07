@@ -1,4 +1,13 @@
-"""Function Calling 节点 """
+"""Function Calling 节点 — ReAct 多轮工具循环
+
+核心改进（相对旧版固定 2 步）：
+  旧版：LLM 选工具 → 执行 → 再调一次 LLM 生成回复（无论信息够不够）
+  新版：while 循环 —— LLM 决定调工具 → 执行 → 结果回填上下文 → 再问 LLM
+        直到 LLM 认为信息足够（不再要求调工具）或达到 MAX_TOOL_ROUNDS 上限
+
+这样"把 90 分以上的候选人简历发给 HR"这类复合任务可以自然拆解为：
+  查列表 → 逐个查详情 → 发邮件  （3+ 轮自主决策）
+"""
 import json                                                         # 解析 LLM 的 JSON 参数
 import logging
 from app.workflow import RecruitmentState                     # 流程状态对象
@@ -8,17 +17,23 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
+# 单次请求最多工具轮数（防止死循环 / 失控成本）
+MAX_TOOL_ROUNDS = 5
 
 # ===== Function Calling 系统提示词 =====
 FC_SYSTEM_PROMPT = """你是 AI 招聘助手的智能调度器。你可以使用以下工具来回答用户关于招聘系统的问题。
 
 规则：
-1. 根据用户的问题，选择合适的工具
+1. 根据用户的问题选择合适的工具；一次调用信息不够时，可以继续调用其他工具补充
 2. 如果需要候选人信息，先查候选人列表，再查详情
-3. 如果用户问"最近"或"今天"，使用日期相关的筛选
-4. 发送邮件前，先确认候选人存在
-5. 如果用户的问题不需要工具，直接回答即可
-6. 始终返回清晰、结构化的中文回复"""
+3. 复合任务请拆解步骤执行，例如"把90分以上的候选人简历发给HR"：
+   先查候选人列表 → 逐个查详情 → 再发邮件
+4. 如果用户问"最近"或"今天"，使用日期相关的筛选
+5. 制度/规章类问题（年假、试用期、报销、考勤等）必须调用 query_policy_docs 工具查询知识库；若工具返回 error，向用户说明制度知识库服务暂不可用
+6. 发送邮件前，先确认候选人存在
+7. 如果用户的问题不需要工具，直接回答即可
+8. 对话中可能包含历史消息，注意上下文指代（如"他"、"那个人"、"刚才那个候选人"）
+9. 始终返回清晰、结构化的中文回复"""
 
 # ===== Function Calling 节点入口 =====
 async def function_calling_node(state: RecruitmentState) -> dict:
@@ -32,102 +47,125 @@ async def function_calling_node(state: RecruitmentState) -> dict:
 
     return await run_function_calling(query)                        # 委托核心函数
 
-# ===== Function Calling 核心函数 =====
-async def run_function_calling(query: str, system_prompt: str = "") -> dict:
-    # 工具定义 获取5个MCP Tool 的 OpenAI 格式定义
-    tools = get_tool_definitions_openai()
-    # 用户消息
-    messages = [{"role": "user", "content": query}]
-    # 系统提示词
-    system = system_prompt or FC_SYSTEM_PROMPT                      # 系统提示词
 
-    # ===== 第 1 轮 LLM 调用：决定用不用工具、用哪个 =====
-    # 定义 OpenAI 客户端
-    client = AsyncOpenAI(                                           # 创建临时 OpenAI 客户端
-        api_key=settings.OPENAI_API_KEY, # 从配置文件获取 API 密钥
-        base_url=settings.OPENAI_BASE_URL,# 从配置文件获取 OpenAI 基础 URL
+# ===== Function Calling 核心函数（ReAct 多轮循环） =====
+async def run_function_calling(
+    query: str,
+    system_prompt: str = "",
+    history: list | None = None,
+) -> dict:
+    """ReAct 多轮工具循环
+
+    Args:
+        query: 用户本次输入
+        system_prompt: 可选自定义系统提示词
+        history: 可选历史消息 [{"role": "user"/"assistant", "content": "..."}]
+                 由 session_memory 注入，让"刚才那个人"这类指代可解析
+    """
+    tools = get_tool_definitions_openai()
+    system = system_prompt or FC_SYSTEM_PROMPT
+
+    # 历史上下文 + 本次输入
+    messages: list = list(history or []) + [{"role": "user", "content": query}]
+
+    client = AsyncOpenAI(
+        api_key=settings.OPENAI_API_KEY,
+        base_url=settings.OPENAI_BASE_URL,
     )
 
-    response = await client.chat.completions.create(                # 调 LLM
+    tool_call_records: list = []                                    # 跨轮累计的工具调用记录
+    used_tools = False
+    rounds_used = 0
+
+    # ===== ReAct 循环 =====
+    for round_i in range(MAX_TOOL_ROUNDS):
+        response = await client.chat.completions.create(
+            model=settings.OPENAI_MODEL,
+            messages=[{"role": "system", "content": system}] + messages,
+            tools=tools,
+            tool_choice="auto",                                     # LLM 自主决定调不调工具
+            temperature=0.1,
+            max_tokens=4096,
+        )
+
+        message = response.choices[0].message
+        rounds_used = round_i + 1
+
+        # LLM 认为信息足够 → 不再调用工具，直接给出最终回复
+        if not message.tool_calls:
+            return {
+                "fc_result": json.dumps({
+                    "mode": "direct_answer" if not used_tools else "tool_calling",
+                    "rounds": rounds_used,
+                    "tool_count": len(tool_call_records),
+                    "results_summary": [
+                        {"name": r["name"], "arguments": r["arguments"]}
+                        for r in tool_call_records
+                    ],
+                }, ensure_ascii=False),
+                "fc_tool_calls": tool_call_records,
+                "fc_response": message.content or "",
+            }
+
+        used_tools = True
+
+        # 把本轮 assistant 的工具调用决策追加进对话上下文
+        messages.append({
+            "role": "assistant",
+            "content": message.content or "",
+            "tool_calls": [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+                }
+                for tc in message.tool_calls
+            ],
+        })
+
+        # 执行本轮的每个工具调用，结果逐条回填
+        for tc in message.tool_calls:
+            func_name = tc.function.name
+            try:
+                func_args = json.loads(tc.function.arguments)
+            except json.JSONDecodeError:
+                logger.warning("工具 %s 参数 JSON 解析失败，使用空参数: %s",
+                               func_name, tc.function.arguments)
+                func_args = {}
+
+            result = await execute_tool_directly(func_name, func_args)
+            tool_call_records.append({
+                "id": tc.id, "name": func_name, "arguments": func_args,
+            })
+
+            # 工具结果回填进 messages → 下一轮 LLM 能看到执行结果
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tc.id,
+                "content": result,
+            })
+
+    # 达到最大轮数仍想调工具 → 去掉 tools 参数强制 LLM 生成最终回复（兜底）
+    logger.warning("Function Calling 达到最大工具轮数 %d，强制生成最终回复", MAX_TOOL_ROUNDS)
+    final_response = await client.chat.completions.create(
         model=settings.OPENAI_MODEL,
         messages=[{"role": "system", "content": system}] + messages,
-        tools=tools,                                                # 传入 5 个工具定义
-        tool_choice="auto",                                         # LLM 自动决定是否用工具
-        temperature=0.1,                                            # 低温度 → 稳定选择
+        temperature=0.3,
         max_tokens=4096,
     )
-    # 解析 LLM 回复
-    choice = response.choices[0]
-    message = choice.message                                        # LLM 的回复消息
+    final_text = final_response.choices[0].message.content or ""
 
-    # LLM 决定不调工具 → 直接返回纯文本回复
-    if not message.tool_calls:
-        return {
-            "fc_result": json.dumps({"mode": "direct_answer"}, ensure_ascii=False),
-            "fc_tool_calls": [],
-            "fc_response": message.content or "",
-        }
-
-    # ===== 第 2 步：逐个执行 LLM 选择的工具 =====
-    # 可用工具
-    tool_results = []
-    # 工具调用记录（返回给前端/日志）
-    tool_call_records = []
-    # 遍历每个工具调用
-    for tc in message.tool_calls:
-        # 获取工具名称
-        func_name = tc.function.name
-        try:
-            # 转化成 JSON 格式
-            func_args = json.loads(tc.function.arguments)
-        except json.JSONDecodeError:
-            logger.warning("工具 %s 参数 JSON 解析失败，使用空参数: %s", func_name, tc.function.arguments)
-            func_args = {}
-        # 执行工具（execute_tool_directly 定义在 client.py）
-        result = await execute_tool_directly(func_name, func_args)
-        # 记录工具调用记录
-        tool_call_records.append({
-            "id": tc.id, "name": func_name, "arguments": func_args,
-        })
-        # 记录工具执行结果
-        tool_results.append({
-            "tool_call_id": tc.id, "role": "tool", "content": result,
-        })
-
-    # ===== 第 2 轮 LLM 调用：基于工具结果生成最终回复 =====
-    # 定义最终消息列表
-    final_messages = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": query},
-    ]
-    # 添加原始回复消息
-    final_messages.append({
-        "role": "assistant",
-        "content": message.content,
-        "tool_calls": [
-            {"id": tc.id, "type": "function",
-             "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
-            for tc in message.tool_calls
-        ],
-    })
-    # 添加工具执行结果消息
-    final_messages.extend(tool_results)                             # 补上工具执行结果
-    # 调用 LLM 生成最终回复
-    final_response = await client.chat.completions.create(          # 再调一次 LLM 生成最终回复
-        model=settings.OPENAI_MODEL,
-        messages=final_messages,
-        temperature=0.3,                                            # 稍高温度 → 回复更自然
-        max_tokens=4096,
-    )
-    # 解析 LLM 回复
-    final_text = final_response.choices[0].message.content or ""    # 最终回复文本
-    # 返回结果
     return {
-        "fc_result": json.dumps({                                   # 工具执行摘要
+        "fc_result": json.dumps({
             "mode": "tool_calling",
+            "rounds": rounds_used,
             "tool_count": len(tool_call_records),
-            "results_summary": [tr["content"][:200] + "..." for tr in tool_results],
+            "forced_final": True,
+            "results_summary": [
+                {"name": r["name"], "arguments": r["arguments"]}
+                for r in tool_call_records
+            ],
         }, ensure_ascii=False),
-        "fc_tool_calls": tool_call_records,                         # 工具调用记录
-        "fc_response": final_text,                                  # LLM 最终回复
+        "fc_tool_calls": tool_call_records,
+        "fc_response": final_text,
     }

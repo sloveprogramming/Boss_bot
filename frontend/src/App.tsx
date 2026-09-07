@@ -14,6 +14,7 @@ import Questionnaires from "./pages/Questionnaires";
 import PolicyAgent from "./pages/PolicyAgent";
 import ExamAnalysis from "./pages/ExamAnalysis";
 import ScoringInsights from "./pages/ScoringInsights";
+import JdGenerator from "./pages/JdGenerator";
 
 export default function App() {
   return (
@@ -33,6 +34,7 @@ export default function App() {
               <Route path="/policy-agent" element={<PolicyAgent />} />
               <Route path="/exam-analysis" element={<ExamAnalysis />} />
               <Route path="/scoring" element={<ScoringInsights />} />
+              <Route path="/jd-generator" element={<JdGenerator />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

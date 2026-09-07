@@ -1,7 +1,7 @@
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Users, GitBranch, CalendarClock, FileText,
-  Bot, ClipboardCheck, SlidersHorizontal, LogOut, Sparkles,
+  Bot, ClipboardCheck, SlidersHorizontal, LogOut, Sparkles, Briefcase,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
@@ -16,7 +16,8 @@ const NAV: NavItem[] = [
   { to: "/pipeline",     label: "招聘管道", icon: GitBranch },
   { to: "/interviews",   label: "面试管理", icon: CalendarClock },
   { to: "/questionnaires", label: "问卷管理", icon: FileText },
-  { to: "/policy-agent", label: "制度问答", icon: Bot },
+  { to: "/policy-agent", label: "智能助手", icon: Bot },
+  { to: "/jd-generator", label: "JD 生成", icon: Briefcase },
   { to: "/exam-analysis", label: "试卷分析", icon: ClipboardCheck },
   { to: "/scoring", label: "评分优化", icon: SlidersHorizontal },
 ];

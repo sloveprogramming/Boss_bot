@@ -134,6 +134,14 @@ class Settings(BaseSettings):
     TASK_RATE_LIMIT_PER_MIN: int = 300            # 软限速参考值（配合多 worker 横向扩展）
     TASK_ENABLED: bool = True                     # False → 全部走内联同步（降级模式）
 
+    # ===== Langfuse 可观测性（可选，默认关闭）=====
+    # 配置后每次 LLM 调用自动上报 trace/generation（含 token/延迟），
+    # 在 Langfuse 控制台按 session 串起完整对话链路；不配置零开销自动跳过。
+    LANGFUSE_ENABLED: bool = False
+    LANGFUSE_PUBLIC_KEY: Optional[str] = None
+    LANGFUSE_SECRET_KEY: Optional[str] = None
+    LANGFUSE_HOST: str = "https://cloud.langfuse.com"
+
     model_config = SettingsConfigDict(
         env_file=_find_root_env(),
         env_file_encoding="utf-8",

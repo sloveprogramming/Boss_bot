@@ -7,6 +7,7 @@
 import json
 from typing import Any
 from app.mcp.tools import (
+    query_policy_docs,
     query_candidates,
     get_candidate_detail,
     query_interviews,
@@ -22,6 +23,7 @@ DIRECT_TOOLS = {
     "query_interviews": query_interviews,
     "get_dashboard_stats": get_dashboard_stats,
     "send_email": send_email,
+    "query_policy_docs": query_policy_docs,
 }
 
 # 工具定义（OpenAI Function Calling 格式）

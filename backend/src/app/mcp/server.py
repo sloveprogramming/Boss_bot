@@ -12,6 +12,7 @@ from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
 from app.mcp.tools import (
+    query_policy_docs,
     query_candidates,
     get_candidate_detail,
     query_interviews,
@@ -157,6 +158,20 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "required": ["candidate_id"],
         },
     },
+    {
+        "name": "query_policy_docs",
+        "description": "查询企业制度/规章/政策知识库（年假、试用期、报销、考勤、加班、福利、入职、离职等）。返回制度答案与引用来源文档。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": "要查询的制度问题，如：年假有几天？试用期多久？",
+                },
+            },
+            "required": ["question"],
+        },
+    },
 ]
 
 
@@ -183,7 +198,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         "get_candidate_detail": get_candidate_detail,
         "query_interviews": query_interviews,
         "get_dashboard_stats": get_dashboard_stats,
-        "send_email": send_email,
+                "send_email": send_email,
+        "query_policy_docs": query_policy_docs,
     }
 
     tool_fn = tool_map.get(name)
