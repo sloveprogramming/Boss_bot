@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
-  LayoutDashboard, Users, GitBranch, CalendarClock, FileText,
+  LayoutDashboard, Users, GitBranch, CalendarClock, FileText, Mail,
   Bot, ClipboardCheck, SlidersHorizontal, LogOut, Sparkles, Briefcase, Pencil,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -19,6 +19,7 @@ const NAV: NavItem[] = [
   { to: "/pipeline",     label: "招聘管道", icon: GitBranch },
   { to: "/interviews",   label: "面试管理", icon: CalendarClock },
   { to: "/questionnaires", label: "问卷管理", icon: FileText },
+  { to: "/email-templates", label: "邮件模板", icon: Mail },
   { to: "/policy-agent", label: "智能助手", icon: Bot },
   { to: "/jd-generator", label: "JD 生成", icon: Briefcase },
   { to: "/exam-analysis", label: "试卷分析", icon: ClipboardCheck },

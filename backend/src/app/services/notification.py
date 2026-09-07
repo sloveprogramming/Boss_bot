@@ -1,3 +1,5 @@
+# 【小白导读】通知中心：问卷邀请/面试邀请/提醒/拒信/Offer 的邮件模板与发送，
+#   支持 SMTP；每发一封都会在 notifications 表留记录。被面试、问卷、工作流多处调用。
 """通知服务 — 支持邮件/短信/企业微信/钉钉多渠道统一发送
 
 依赖注入：
@@ -9,6 +11,7 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models import Notification
+from app.services.notification_template_svc import resolve_template, render_text
 import httpx
 import time
 import hmac
@@ -140,7 +143,7 @@ class NotificationService:
         if not candidate:
             raise ValueError(f"候选人不存在: {candidate_id}")
 
-        template_body = self.TEMPLATES.get(template)
+        template_body = await resolve_template(db, template)
         if not template_body:
             raise ValueError(f"不支持的模板: {template}")
 
@@ -155,8 +158,9 @@ class NotificationService:
             raise ValueError(f"无法确定收件人地址，候选人{candidate_id}缺少联系方式")
 
         context = {"candidate_name": candidate.name, "position": candidate.position, **(extra or {})}
-        subject = template_body["subject"]
-        body = template_body["body"].format(**context)
+        # 安全渲染：DB 模板里的未知占位符原样保留，不会因 HR 手写变量名错误导致 500
+        subject = render_text(template_body.get("subject", ""), context)
+        body = render_text(template_body.get("body", ""), context)
 
         notification = Notification(
             candidate_id=candidate_id,

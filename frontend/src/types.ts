@@ -342,3 +342,45 @@ export interface PolicyChatMessage {
   content: string;
   created_at?: string;
 }
+
+// ===== 可配置邮件模板 =====
+export type TemplateCategory = "questionnaire" | "interview" | "result" | "other";
+
+export interface EmailTemplate {
+  id: number;
+  code: string;
+  name: string;
+  category: TemplateCategory;
+  subject: string;
+  body: string;
+  is_system: boolean;
+  is_active: boolean;
+  created_by?: number | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface TemplateDraft {
+  name: string;
+  code?: string | null;
+  category: TemplateCategory;
+  subject: string;
+  body: string;
+  used_variables: string[];
+}
+
+export interface TemplatePreviewResult {
+  subject: string;
+  body: string;
+  remaining_placeholders: string[];
+}
+
+export const TEMPLATE_CATEGORY_META: Record<TemplateCategory, { label: string; cls: string }> = {
+  questionnaire: { label: "问卷类",   cls: "bg-purple-50 text-purple-600" },
+  interview:     { label: "面试类",   cls: "bg-cyan-50 text-cyan-600" },
+  result:        { label: "结果通知", cls: "bg-emerald-50 text-emerald-600" },
+  other:         { label: "其他",     cls: "bg-slate-100 text-slate-600" },
+};
+
+export const templateCategoryLabel = (c: string): string =>
+  (TEMPLATE_CATEGORY_META[c as TemplateCategory]?.label) ?? c;

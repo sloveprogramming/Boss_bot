@@ -5,6 +5,7 @@ import type {
   PipelineOverview, ExamAnalysisItem, CalendarInterviewResponse,
   QuestionnaireOverviewItem, ScoringInsights, ScoringIteration, User,
   PolicyChatSession, PolicyChatMessage, OwnerReassignResult,
+  EmailTemplate, TemplateCategory, TemplateDraft, TemplatePreviewResult,
 } from "../types";
 
 export const TOKEN_KEY = "recruit_token";
@@ -244,5 +245,24 @@ export const api = {
       http.get<ScoringIteration[]>("/api/scoring/iterations", { params: { limit } }),
     applyIteration: (data: { to_weights: Record<string, number>; category?: string; note?: string }) =>
       http.post<ScoringIteration & { warning?: string }>("/api/scoring/iterations", data),
+  },
+
+  templates: {
+    list: (category?: TemplateCategory) =>
+      http.get<{ items: EmailTemplate[]; total: number }>("/api/templates", { params: category ? { category } : {} }),
+    create: (data: { code: string; name: string; category: string; subject: string; body: string; is_active?: boolean }) =>
+      http.post<EmailTemplate>("/api/templates", data),
+    update: (id: number, data: Partial<Pick<EmailTemplate, "name" | "category" | "subject" | "body" | "is_active">>) =>
+      http.put<EmailTemplate>(`/api/templates/${id}`, data),
+    remove: (id: number) => http.delete<{ success: boolean }>(`/api/templates/${id}`),
+    reset: (id: number) => http.post<EmailTemplate>(`/api/templates/${id}/reset`),
+    restoreDefaults: () => http.post<{ inserted: number; existed: number }>("/api/templates/restore-defaults"),
+    renderPreview: (data: {
+      template_id?: number; code?: string; subject?: string; body?: string;
+      candidate_name?: string; position?: string; extra?: Record<string, string>;
+    }) => http.post<TemplatePreviewResult>("/api/templates/render-preview", data),
+    generate: (data: { focus: string; code?: string; candidate_name?: string }) =>
+      http.post<{ draft: TemplateDraft; whitelist: string[]; unexpected_variables: string[] }>(
+        "/api/templates/generate", data),
   },
 };

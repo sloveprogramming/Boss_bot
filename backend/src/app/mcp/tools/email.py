@@ -1,3 +1,4 @@
+# 【小白导读】工具：让 AI 能发邮件（内部走 services/notification.py 的通道）。
 """MCP 邮件发送 Tool — 基于现有 NotificationService 封装
 
 所有导入均为懒加载，避免触发 services/__init__.py 全量导入链。
@@ -72,14 +73,15 @@ async def send_email(
                     "error": f"候选人不存在: {candidate_id}",
                 }, ensure_ascii=False)
 
-            # 渲染自定义模板变量
+            # 渲染自定义模板变量（安全渲染：未知占位符原样保留，不因变量缺失而报错）
+            from app.services.notification import render_text
             var_context = {
                 "candidate_name": candidate.name,
                 "position": candidate.position,
                 **(extra_vars or {}),
             }
-            rendered_subject = subject.format(**var_context)
-            rendered_body = body.format(**var_context)
+            rendered_subject = render_text(subject, var_context)
+            rendered_body = render_text(body, var_context)
 
             # 直接调用 SMTP 发送
             try:
