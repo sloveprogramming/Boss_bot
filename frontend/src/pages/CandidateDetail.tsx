@@ -52,8 +52,8 @@ export default function CandidateDetail() {
 
   const ownerName = useMemo(() => {
     const m: Record<number, string> = {};
-    hrUsers.forEach((u) => { m[u.id] = u.username; });
-    if (user) m[user.id] = user.username; // 管理员自己名下的候选也能显示姓名
+    hrUsers.forEach((u) => { m[u.id] = u.display_name || u.username; });
+    if (user) m[user.id] = user.display_name || user.username; // 管理员自己名下的候选也能显示姓名
     return m;
   }, [hrUsers, user]); // eslint-disable-line
 
@@ -317,9 +317,9 @@ export default function CandidateDetail() {
           <Select value={newOwnerId} onChange={(e) => setNewOwnerId(e.target.value)}>
             <option value="" disabled>请选择负责人</option>
             {hrUsers.map((u) => (
-              <option key={u.id} value={String(u.id)}>{u.username}</option>
+              <option key={u.id} value={String(u.id)}>{u.display_name || u.username}</option>
             ))}
-            {user && <option value={String(user.id)}>{user.username}（我自己）</option>}
+            {user && <option value={String(user.id)}>{user.display_name || user.username}（我自己）</option>}
           </Select>
         </Field>
         <div className="flex justify-end gap-2 mt-5 pt-4 border-t border-slate-100">

@@ -142,6 +142,20 @@ class Settings(BaseSettings):
     LANGFUSE_SECRET_KEY: Optional[str] = None
     LANGFUSE_HOST: str = "https://cloud.langfuse.com"
 
+    # ===== JD 全网参考搜索（无 API key 网页抓取，JD 页 & MCP 工具共用） =====
+    JD_REF_ENABLED: bool = True            # 总开关；false → 工具返回 error、JD reference 模式退化为普通生成
+    JD_REF_BING_BASE: str = "https://cn.bing.com"   # 国内 ECS 用 cn.bing.com；出网受限可换 www.bing.com
+    JD_REF_SEARCH_PROVIDERS: str = "sogou,bing_cn"  # 逗号分隔，顺序即优先级；内置 sogou/bing_cn(RSS)/bing_cn_html(HTML)
+    JD_REF_SEARCH_TIMEOUT: float = 10.0             # 单次搜索请求超时（秒）
+    JD_REF_SEARCH_RETRIES: int = 1                  # provider 额外重试次数
+    JD_REF_MAX_RESULTS: int = 8                     # 默认外部参考结果条数上限
+    JD_REF_FETCH_PAGE_BODY: bool = False            # 实验性：额外抓取 topN 结果正文（招聘站多反爬，默认关）
+    JD_REF_FETCH_PAGE_LIMIT: int = 3                # 抓正文条数上限
+    JD_REF_FETCH_TIMEOUT: float = 5.0               # 抓正文单请求超时（秒）
+    JD_REF_USE_INTERNAL_KB: bool = False            # 可选：追加检索制度知识库相关岗位说明（默认关）
+    JD_REF_INTERNAL_KB_TIMEOUT: float = 8.0         # 内部知识库检索超时（秒）
+    JD_REF_MAX_EXTRA_QUERY_CHARS: int = 60          # extra 注入搜索词的最大长度
+
     model_config = SettingsConfigDict(
         env_file=_find_root_env(),
         env_file_encoding="utf-8",

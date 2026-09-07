@@ -1,10 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Search, Trash2, ChevronLeft, ChevronRight, Upload, FileText, X } from "lucide-react";
+import { Plus, Search, Trash2, ChevronLeft, ChevronRight, Upload, FileText, X, Download } from "lucide-react";
 import { api, errDetail } from "../lib/api";
 import { Badge, Button, Card, EmptyState, Field, Input, Modal, PageHeader, Select, Spinner, Textarea, useToast } from "../components/ui";
 import { useAuth } from "../contexts/AuthContext";
 import { STATUS_META, statusMeta, type Candidate, type User } from "../types";
+
+/** 从 Content-Disposition 解析文件名（优先 RFC5987 filename*=UTF-8''，再退回 filename=） */
+function filenameFromCd(cd: string, fallback: string): string {
+  if (!cd) return fallback;
+  const m = cd.match(/filename\*=UTF-8''([^;]+)/i) || cd.match(/filename="?([^";]+)"?/i);
+  if (!m?.[1]) return fallback;
+  try { return decodeURIComponent(m[1]); } catch { return m[1]; }
+}
 
 export default function Candidates() {
   const nav = useNavigate();
@@ -28,6 +36,7 @@ export default function Candidates() {
   const [hrUsers, setHrUsers] = useState<User[]>([]);   // 可指派负责人候选
   const [ownerId, setOwnerId] = useState("");           // 新建时的负责人 id（仅 admin）
   const fileRef = useRef<HTMLInputElement>(null);
+  const [exporting, setExporting] = useState(false);
   const pageSize = 20;
 
   // 可指派给候选人的账号：admin=自己 + 全部 HR；HR=同名 HR（用于 owner 列映射）
@@ -47,8 +56,8 @@ export default function Candidates() {
 
   const ownerNameMap = useMemo(() => {
     const m: Record<string, string> = {};
-    hrUsers.forEach((u) => { m[u.id] = u.username; });
-    if (user) m[user.id] = user.username; // 保证 admin 自己的归属也能显示
+    hrUsers.forEach((u) => { m[u.id] = u.display_name || u.username; });
+    if (user) m[user.id] = user.display_name || user.username; // 保证 admin 自己的归属也能显示
     return m;
   }, [hrUsers, user]);
 
@@ -153,6 +162,35 @@ export default function Candidates() {
     } catch (err) { toast(errDetail(err), "err"); }
   };
 
+  // ===== 导出 Excel（后端按当前账号可见范围全量导出，与页面筛选无关） =====
+  const exportExcel = async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const resp = await api.candidates.exportAll();
+      const cd = String(resp.headers?.["content-disposition"] ?? "");
+      const fallback = `候选人名单_${new Date().toISOString().slice(0, 10).replace(/-/g, "")}.xlsx`;
+      const name = filenameFromCd(cd, fallback);
+      const url = URL.createObjectURL(resp.data as Blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      toast(`已导出 ${name}`);
+    } catch (e) {
+      // blob 响应的错误体需先读文本再取 detail，否则只会拿到默认文案
+      let msg = errDetail(e);
+      const data = (e as { response?: { data?: unknown } })?.response?.data;
+      if (data instanceof Blob) {
+        try {
+          const j = JSON.parse(await data.text());
+          if (j?.detail) msg = String(j.detail);
+        } catch { /* 忽略解析失败，退回默认错误文案 */ }
+      }
+      toast(msg, "err");
+    } finally { setExporting(false); }
+  };
+
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   return (
@@ -160,7 +198,14 @@ export default function Candidates() {
       <PageHeader
         title="候选人"
         desc={`共 ${total} 位候选人`}
-        actions={<Button onClick={() => setCreateOpen(true)}><Plus size={15} /> 新建候选人</Button>}
+        actions={
+          <div className="flex gap-2">
+            <Button variant="outline" loading={exporting} onClick={exportExcel}>
+              <Download size={15} /> 导出 Excel
+            </Button>
+            <Button onClick={() => setCreateOpen(true)}><Plus size={15} /> 新建候选人</Button>
+          </div>
+        }
       />
 
       {/* 工具栏 */}
@@ -314,9 +359,9 @@ export default function Candidates() {
           <Field label="负责人">
             <Select value={ownerId} onChange={(e) => setOwnerId(e.target.value)}>
               {hrUsers.filter((u) => u.role === "hr").map((u) => (
-                <option key={u.id} value={String(u.id)}>{u.username}</option>
+                <option key={u.id} value={String(u.id)}>{u.display_name || u.username}</option>
               ))}
-              {user && <option value={String(user.id)}>{user.username}（我自己）</option>}
+              {user && <option value={String(user.id)}>{user.display_name || user.username}（我自己）</option>}
             </Select>
             <p className="text-xs text-slate-400 mt-1.5 leading-5">指派负责此候选人的 HR；只有该 HR 能看见并跟进（admin 始终全量）。</p>
           </Field>

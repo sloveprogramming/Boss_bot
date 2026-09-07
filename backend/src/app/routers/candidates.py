@@ -1,7 +1,14 @@
 """候选人管理API — CRUD操作"""
 import logging
+from datetime import datetime
+from io import BytesIO
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
+from urllib.parse import quote
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from openpyxl import Workbook
+from openpyxl.styles import Font
+from openpyxl.utils import get_column_letter
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
@@ -122,6 +129,58 @@ async def list_candidates(
     )
 
 
+@router.get("/export")
+async def export_candidates_xlsx(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """导出候选人 Excel（姓名 / 岗位 / 联系方式 / 负责 HR）
+
+    - 范围：当前账号可见的候选人（HR 仅自己名下；admin 全量），与列表接口同隔离。
+    - 联系方式：优先手机号，缺省回退邮箱。
+    - 负责 HR：候选人归属负责人（candidates.owner_user_id → users.username）。
+    - 路由须先于 /{candidate_id} 注册，避免 "export" 被路径参数吞掉。
+    """
+    # 负责 HR 列：姓名优先（display_name），空则回退登录名
+    owner_name_col = func.coalesce(
+        func.nullif(User.display_name, ""), User.username
+    ).label("owner_name")
+    stmt = (
+        select(Candidate, owner_name_col)
+        .outerjoin(User, Candidate.owner_user_id == User.id)
+    )
+    cond = candidate_scope_cond(current_user)
+    if cond is not None:
+        stmt = stmt.where(cond)
+    stmt = stmt.order_by(Candidate.created_at.desc())
+    rows = (await db.execute(stmt)).all()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "候选人"
+    headers = ["姓名", "岗位", "联系方式", "负责 HR"]
+    ws.append(headers)
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+
+    for cand, owner_name in rows:
+        contact = (cand.phone or "").strip() or (cand.email or "").strip()
+        ws.append([cand.name, cand.position, contact, owner_name or ""])
+
+    for idx, width in enumerate([14, 40, 32, 20], start=1):
+        ws.column_dimensions[get_column_letter(idx)].width = width
+
+    buf = BytesIO()
+    wb.save(buf)
+    filename = f"候选人名单_{datetime.now():%Y%m%d}.xlsx"
+    logger.info("导出候选人 Excel: 行数=%d user=%s", len(rows), current_user.username)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
+    )
+
+
 @router.get("/{candidate_id}", response_model=CandidateResponse)
 async def get_candidate(
     candidate_id: int,
@@ -180,7 +239,7 @@ async def reassign_candidate_owner(
         prev = (await db.execute(
             select(User).where(User.id == previous_owner_id)
         )).scalar_one_or_none()
-        previous_owner_name = prev.username if prev else None
+        previous_owner_name = (prev.display_name or prev.username) if prev else None
 
     candidate.owner_user_id = target.id
     await db.flush()
@@ -194,7 +253,7 @@ async def reassign_candidate_owner(
         "previous_owner_user_id": previous_owner_id,
         "previous_owner_name": previous_owner_name,
         "owner_user_id": candidate.owner_user_id,
-        "owner_name": target.username,
+        "owner_name": target.display_name or target.username,
     }
 
 

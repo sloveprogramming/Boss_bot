@@ -15,7 +15,7 @@ from typing import Optional
 from app.config import settings
 from app.database import get_db
 from app.models import (
-    Candidate, TalentPool, TalentPoolStatus, TaskProgress, TaskStatus,
+    Candidate, TalentPool, TalentPoolStatus, TaskProgress, Resume,
     UserRole, User,
 )
 from app.dependencies import (
@@ -60,6 +60,22 @@ def _build_initial_state(candidate, resume_text: str, job_description: str) -> R
     }
 
 
+async def _load_latest_resume_text(db: AsyncSession, candidate_id: int) -> str:
+    """取候选人最新一份简历的纯文本；无简历或空文本时返回空串。
+
+    前端「全自动流程」只传 candidate_id，不带简历文本；
+    若流程第一步拿不到文本会直接空转，这里统一回填 DB 里已存的 raw_text。
+    """
+    result = await db.execute(
+        select(Resume.raw_text)
+        .where(Resume.candidate_id == candidate_id, Resume.raw_text.isnot(None))
+        .order_by(Resume.id.desc())
+        .limit(1)
+    )
+    text = result.scalar_one_or_none()
+    return (text or "").strip()
+
+
 # ====================================================================
 # LangGraph 工作流触发
 # ====================================================================
@@ -80,18 +96,18 @@ async def start_workflow(
     # 获取候选人（越权 404）
     candidate = await ensure_candidate_visible(db, current_user, candidate_id)
 
+    # 前端未传简历文本时，自动回填该候选人最新简历（否则流程第一步即空转）
+    if not resume_text.strip():
+        resume_text = await _load_latest_resume_text(db, candidate_id)
+
     initial_state = _build_initial_state(candidate, resume_text, job_description)
 
     # 高并发防护：优先入队（RabbitMQ）；broker 不可用时降级为内联同步
     if settings.TASK_ENABLED:
         try:
+            # 只入队，不写 task_progress：进度行统一由 worker 消费时 upsert，
+            # 避免 API 与 worker 双写同一 task_id 撞唯一索引。
             task_id = await publish_analysis_task(candidate_id, resume_text, job_description)
-            tp = TaskProgress(
-                task_id=task_id, candidate_id=candidate_id,
-                status=TaskStatus.PENDING.value, progress=0,
-            )
-            db.add(tp)
-            await db.flush()
             logger.info("候选人 %s 工作流已入队 (task_id=%s)", candidate_id, task_id)
             return {
                 "candidate_id": candidate_id,
@@ -195,17 +211,17 @@ async def auto_process(
         return {"candidate_id": candidate_id, "action": "send_offer", "status": "ok"}
 
     # 对于需要流程序列的操作，优先入队（RabbitMQ），不可用时降级内联
+    # 前端未传简历文本时，自动回填该候选人最新简历（否则流程第一步即空转）
+    if not resume_text.strip():
+        resume_text = await _load_latest_resume_text(db, candidate_id)
+
     initial_state = _build_initial_state(candidate, resume_text, job_description)
 
     if settings.TASK_ENABLED:
         try:
+            # 只入队，不写 task_progress：进度行统一由 worker 消费时 upsert，
+            # 避免 API 与 worker 双写同一 task_id 撞唯一索引。
             task_id = await publish_analysis_task(candidate_id, resume_text, job_description)
-            tp = TaskProgress(
-                task_id=task_id, candidate_id=candidate_id,
-                status=TaskStatus.PENDING.value, progress=0,
-            )
-            db.add(tp)
-            await db.flush()
             logger.info("候选人 %s 自动处理已入队 (task_id=%s)", candidate_id, task_id)
             return {
                 "candidate_id": candidate_id,
@@ -794,8 +810,9 @@ FC_SYSTEM_PROMPT_STREAM = """你是 AI 招聘助手的智能调度器。你可�
 4. 如果用户问"最近"或"今天"，使用日期相关的筛选
 5. 发送邮件前，先确认候选人存在
 6. 如果用户的问题不需要工具，直接回答即可
-7. 回答制度问题时，如工具结果包含 cited_sources，在回复末尾附上引用的文档名
-8. 始终返回清晰、结构化的中文回复"""
+7. 用户要找 XX 岗位的 JD / 岗位职责 / 招聘要求模板参考时，调用 jd_reference_search 工具；若工具返回 error，向用户说明全网搜索功能暂不可用
+8. 回答制度问题时，如工具结果包含 cited_sources，在回复末尾附上引用的文档名
+9. 始终返回清晰、结构化的中文回复"""
 
 
 @router.post("/start/{candidate_id}/stream")

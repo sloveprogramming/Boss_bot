@@ -33,7 +33,8 @@ FC_SYSTEM_PROMPT = """你是 AI 招聘助手的智能调度器。你可以使用
 6. 发送邮件前，先确认候选人存在
 7. 如果用户的问题不需要工具，直接回答即可
 8. 对话中可能包含历史消息，注意上下文指代（如"他"、"那个人"、"刚才那个候选人"）
-9. 始终返回清晰、结构化的中文回复"""
+9. 用户要找 XX 岗位的 JD / 岗位职责 / 招聘要求模板参考时，调用 jd_reference_search 工具；若工具返回 error，向用户说明全网搜索功能暂不可用
+10. 始终返回清晰、结构化的中文回复"""
 
 # ===== Function Calling 节点入口 =====
 async def function_calling_node(state: RecruitmentState) -> dict:

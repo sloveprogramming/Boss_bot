@@ -1,10 +1,13 @@
+import { useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Users, GitBranch, CalendarClock, FileText,
-  Bot, ClipboardCheck, SlidersHorizontal, LogOut, Sparkles, Briefcase,
+  Bot, ClipboardCheck, SlidersHorizontal, LogOut, Sparkles, Briefcase, Pencil,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
+import { errDetail } from "../lib/api";
+import { Button, Field, Input, Modal, useToast } from "./ui";
 import FluidBackground from "./FluidBackground";
 
 
@@ -23,9 +26,27 @@ const NAV: NavItem[] = [
 ];
 
 export default function Layout() {
-  const { user, logout } = useAuth();
+  const { user, logout, updateProfile } = useAuth();
   const nav = useNavigate();
   const location = useLocation();
+  const { toast } = useToast();
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [nameInput, setNameInput] = useState("");
+
+  // 显示姓名：优先 users.display_name，缺省回退登录名 username
+  const displayName = (user?.display_name?.trim() || user?.username || "").trim();
+
+  const openProfile = () => { setNameInput(user?.display_name ?? ""); setProfileOpen(true); };
+  const saveProfile = async () => {
+    setSaving(true);
+    try {
+      await updateProfile({ display_name: nameInput.trim() || null });
+      setProfileOpen(false);
+      toast("显示姓名已更新");
+    } catch (e) { toast(errDetail(e), "err"); }
+    finally { setSaving(false); }
+  };
 
   return (
     <div className="relative min-h-screen">
@@ -67,12 +88,20 @@ export default function Layout() {
         <div className="border-t border-white/[.06] p-3">
           <div className="flex items-center gap-3 px-2 py-2 rounded-xl hover:bg-white/[.04] transition-colors">
             <div className="w-8 h-8 rounded-full grad-anim flex items-center justify-center text-white text-sm font-semibold shrink-0 shadow-glow-brand">
-              {(user?.username ?? "?").slice(0, 1).toUpperCase()}
+              {(displayName || "?").slice(0, 1).toUpperCase()}
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-sm text-white truncate">{user?.username}</p>
-              <p className="text-[11px] text-slate-500 uppercase">{user?.role}</p>
+              <p className="text-sm text-white truncate">{displayName || "未登录"}</p>
+              {user?.display_name ? (
+                <p className="text-[11px] text-slate-500 truncate">@{user.username}</p>
+              ) : (
+                <p className="text-[11px] text-slate-500 uppercase">{user?.role}</p>
+              )}
             </div>
+            <button onClick={openProfile} title="设置显示姓名"
+              className="text-slate-500 hover:text-white transition-colors shrink-0 p-1">
+              <Pencil size={14} />
+            </button>
             <button onClick={() => { logout(); nav("/login"); }} title="退出登录"
               className="text-slate-500 hover:text-rose-400 transition-colors shrink-0">
               <LogOut size={16} />
@@ -87,6 +116,22 @@ export default function Layout() {
           <Outlet />
         </div>
       </main>
+
+      {/* 显示姓名编辑弹窗 */}
+      <Modal open={profileOpen} onClose={() => setProfileOpen(false)} title="设置显示姓名">
+        <Field label="显示姓名">
+          <Input value={nameInput} onChange={(e) => setNameInput(e.target.value)}
+            placeholder="如：华升" maxLength={100} autoFocus />
+        </Field>
+        <p className="text-xs text-slate-400 mt-1.5 leading-5">
+          此姓名将显示在左下角、候选人「负责人」列与导出的 Excel「负责 HR」列；
+          留空则回退显示登录账号 {user?.username ? `@${user.username}` : ""}（登录不受影响）。
+        </p>
+        <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-slate-100">
+          <Button variant="ghost" onClick={() => setProfileOpen(false)}>取消</Button>
+          <Button loading={saving} onClick={saveProfile}>保存</Button>
+        </div>
+      </Modal>
     </div>
   );
 }

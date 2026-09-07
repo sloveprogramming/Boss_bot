@@ -25,6 +25,7 @@ mcp>=1.28.0,<2.0              # MCP 协议（1.x 装饰器 API，2.x 不兼容�
 # ===== ???? =====
 python-docx>=1.2.0
 PyMuPDF>=1.28.0
+openpyxl>=3.1.0             # 候选人 Excel 导出
 # ===== 图片/扫描件 OCR（2.x 稳定版，3.x 存在推理 bug 勿升级）=====
 paddleocr>=2.8.0,<3.0
 paddlepaddle>=2.6.0,<3.0

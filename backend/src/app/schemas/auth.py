@@ -24,6 +24,7 @@ class UserCreate(BaseModel):
     password: str = Field(..., min_length=4, max_length=128)
     role: UserRole = UserRole.HR
     email: Optional[str] = None
+    display_name: Optional[str] = None  # 显示姓名（可选）
 
 
 class SetupAdminRequest(BaseModel):
@@ -31,6 +32,11 @@ class SetupAdminRequest(BaseModel):
     username: str = Field(..., min_length=2, max_length=100)
     password: str = Field(..., min_length=6, max_length=128, description="管理员密码（至少6位）")
     email: Optional[str] = None
+
+
+class UpdateProfileRequest(BaseModel):
+    """更新当前用户资料请求（仅 display_name；空串=清除，回退登录名）"""
+    display_name: Optional[str] = Field(None, max_length=100, description="显示姓名")
 
 
 class ChangePasswordRequest(BaseModel):
@@ -45,6 +51,7 @@ class UserResponse(BaseModel):
     username: str
     role: str
     email: Optional[str] = None
+    display_name: Optional[str] = None
     is_active: bool
 
     model_config = ConfigDict(from_attributes=True)

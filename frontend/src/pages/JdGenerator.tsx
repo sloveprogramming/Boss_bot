@@ -1,15 +1,19 @@
 import { useState } from "react";
-import { Briefcase, Copy, RefreshCw, Sparkles } from "lucide-react";
+import { Briefcase, Copy, Globe, RefreshCw, Sparkles } from "lucide-react";
 import { getToken } from "../lib/api";
 import { Button, Card, Input, PageHeader, Textarea, useToast } from "../components/ui";
 
 const EDU_OPTIONS = ["不限", "大专", "本科", "硕士", "博士"];
+
+interface JdSource { title: string; url?: string; snippet?: string; type?: string }
 
 /** 主后端 SSE 读取（/api 直连 :18000，不走 postSSE 的 /rag-api 映射） */
 async function postBackendSSE(
   url: string,
   body: Record<string, unknown>,
   onDelta: (full: string) => void,
+  onSources?: (s: JdSource[]) => void,
+  onNotes?: (n: string[]) => void,
 ): Promise<string> {
   const res = await fetch(url, {
     method: "POST",
@@ -38,6 +42,8 @@ async function postBackendSSE(
         const j = JSON.parse(payload);
         if (j.error) throw new Error(j.error);
         if (j.text) { full += j.text; onDelta(full); }
+        if (j.sources) onSources?.(j.sources);
+        if (j.notes) onNotes?.(j.notes);
       } catch (e) {
         if (e instanceof SyntaxError) continue; // 心跳/非 JSON 忽略
         throw e;
@@ -49,9 +55,11 @@ async function postBackendSSE(
 
 export default function JdGenerator() {
   const { toast } = useToast();
-  const [form, setForm] = useState({ position: "", salary: "", education: "本科", extra: "" });
+  const [form, setForm] = useState({ position: "", salary: "", education: "本科", extra: "", reference: false });
   const [jd, setJd] = useState("");
   const [streaming, setStreaming] = useState(false);
+  const [sources, setSources] = useState<JdSource[]>([]);
+  const [notes, setNotes] = useState<string[]>([]);
 
   const setField = (k: keyof typeof form) => (e: { target: { value: string } }) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -62,9 +70,17 @@ export default function JdGenerator() {
       return;
     }
     setJd("");
+    setSources([]);
+    setNotes([]);
     setStreaming(true);
     try {
-      const full = await postBackendSSE("/api/jd/generate/stream", form, (t) => setJd(t));
+      const full = await postBackendSSE(
+        "/api/jd/generate/stream",
+        form,
+        (t) => setJd(t),
+        (s) => setSources(s),
+        (n) => setNotes(n),
+      );
       if (!full.trim()) toast("未生成内容，请重试", "err");
     } catch (e) {
       toast(e instanceof Error ? e.message : "生成失败", "err");
@@ -83,7 +99,7 @@ export default function JdGenerator() {
     <div>
       <PageHeader
         title="JD 生成"
-        desc="输入岗位、薪资与学历要求，AI 自动生成结构化岗位描述（已内置就业合规检查）"
+        desc="输入岗位、薪资与学历要求，AI 自动生成结构化岗位描述（已内置就业合规检查）；可勾选参考全网同类真实 JD 获取更贴近市场的草稿"
       />
 
       <div className="grid gap-5 lg:grid-cols-[360px_1fr] items-start">
@@ -119,15 +135,30 @@ export default function JdGenerator() {
             <label className="text-xs text-slate-500 mb-1 block">补充说明（可选）</label>
             <Textarea
               rows={3}
-              placeholder="团队亮点 / 技术栈 / 福利等，让 JD 更有区分度"
+              placeholder="团队亮点 / 技术栈 / 福利 / 行业限定等，让 JD 更有区分度"
               value={form.extra}
               onChange={setField("extra")}
             />
           </div>
 
+          <label className="flex items-start gap-2 text-xs text-slate-600 cursor-pointer select-none bg-slate-50 rounded-xl px-3 py-2.5">
+            <input
+              type="checkbox"
+              checked={form.reference}
+              onChange={(e) => setForm((f) => ({ ...f, reference: e.target.checked }))}
+              className="mt-0.5"
+            />
+            <span className="leading-5">
+              参考全网同类真实 JD 生成
+              <span className="text-slate-400 block">联网搜索同类岗位素材，按公司档案适配后生成，结果附引用来源</span>
+            </span>
+          </label>
+
           <Button className="w-full" loading={streaming} onClick={generate} disabled={!form.position.trim()}>
-            <Sparkles size={15} className="mr-1.5" />
-            {streaming ? "生成中..." : "生成 JD"}
+            {form.reference
+              ? <Globe size={15} className="mr-1.5" />
+              : <Sparkles size={15} className="mr-1.5" />}
+            {streaming ? (form.reference ? "正在全网搜索并生成..." : "生成中...") : form.reference ? "参考全网生成 JD" : "生成 JD"}
           </Button>
           <p className="text-[11px] text-slate-400 leading-relaxed">
             生成结果为草稿建议，发布前请人工确认内容合规与准确性。
@@ -154,7 +185,7 @@ export default function JdGenerator() {
           {streaming && !jd ? (
             <div className="flex-1 flex items-center justify-center text-slate-400 text-sm">
               <Sparkles size={18} className="mr-2 animate-pulse text-brand-400" />
-              AI 正在撰写 JD...
+              {form.reference ? "正在联网搜索同类岗位 JD 素材并撰写..." : "AI 正在撰写 JD..."}
             </div>
           ) : (
             <Textarea
@@ -164,6 +195,35 @@ export default function JdGenerator() {
               placeholder={'生成结果将显示在这里，例如：\n\n## 岗位职责\n- 负责核心服务的设计与开发...\n\n## 任职要求\n- 本科及以上学历...'}
               className="flex-1 min-h-[440px] leading-relaxed font-mono text-[13px] resize-none"
             />
+          )}
+
+          {/* 引用来源（参考全网模式生成结束后展示） */}
+          {!streaming && sources.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-slate-100">
+              <p className="text-xs text-slate-400 mb-1.5">
+                <Globe size={11} className="inline mr-1 -mt-0.5" />
+                引用来源（{sources.length}）
+              </p>
+              <ul className="space-y-1">
+                {sources.map((s, i) => (
+                  <li key={i} className="text-xs flex items-baseline gap-1.5">
+                    {s.url ? (
+                      <a href={s.url} target="_blank" rel="noreferrer"
+                        className="text-brand-600 hover:underline truncate">
+                        {s.title || s.url}
+                      </a>
+                    ) : (
+                      <span className="text-slate-500 truncate">{s.title}</span>
+                    )}
+                    {s.type === "internal" && <span className="text-slate-300 shrink-0">(内部)</span>}
+                    <span className="text-slate-300 text-[10px] shrink-0">{i + 1}</span>
+                  </li>
+                ))}
+              </ul>
+              {notes.length > 0 && (
+                <p className="text-[11px] text-amber-500 mt-2">{notes.join("；")}</p>
+              )}
+            </div>
           )}
         </Card>
       </div>

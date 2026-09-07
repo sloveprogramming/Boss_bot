@@ -17,6 +17,7 @@ from app.mcp.tools import (
     query_interviews,
     get_dashboard_stats,
     send_email,
+    jd_reference_search,
 )
 
 __all__ = [
@@ -26,5 +27,5 @@ __all__ = [
     "DIRECT_TOOLS", "get_tool_definitions_openai", "execute_tool_directly",
     # Tools
     "query_candidates", "get_candidate_detail", "query_interviews",
-    "get_dashboard_stats", "send_email",
+    "get_dashboard_stats", "send_email", "jd_reference_search",
 ]

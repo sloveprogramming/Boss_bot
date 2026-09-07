@@ -18,6 +18,7 @@ from app.mcp.tools import (
     query_interviews,
     get_dashboard_stats,
     send_email,
+    jd_reference_search,
 )
 
 # ===== MCP Server 实例 =====
@@ -172,6 +173,29 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "required": ["question"],
         },
     },
+    {
+        "name": "jd_reference_search",
+        "description": "全网搜索同类岗位真实招聘 JD 并据公司档案生成适配草稿（含引用来源）。用户想找 XX 岗位的 JD / 岗位职责 / 招聘要求模板参考时使用。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "position": {
+                    "type": "string",
+                    "description": "岗位名称，如：电商运营经理",
+                },
+                "extra": {
+                    "type": "string",
+                    "description": "补充需求/行业限定/能力侧重（可选），如：坚果食品、5年以上、擅长付费投放",
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "外部参考条数上限",
+                    "default": 8,
+                },
+            },
+            "required": ["position"],
+        },
+    },
 ]
 
 
@@ -200,6 +224,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         "get_dashboard_stats": get_dashboard_stats,
                 "send_email": send_email,
         "query_policy_docs": query_policy_docs,
+        "jd_reference_search": jd_reference_search,
     }
 
     tool_fn = tool_map.get(name)

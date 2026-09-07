@@ -14,6 +14,7 @@ from app.mcp.tools import (
     query_interviews,
     get_dashboard_stats,
     send_email,
+    jd_reference_search,
 )
 from app.mcp import TOOL_DEFINITIONS
 
@@ -25,6 +26,7 @@ DIRECT_TOOLS = {
     "get_dashboard_stats": get_dashboard_stats,
     "send_email": send_email,
     "query_policy_docs": query_policy_docs,
+    "jd_reference_search": jd_reference_search,
 }
 
 # 工具定义（OpenAI Function Calling 格式）

@@ -9,7 +9,7 @@ from app.database import get_db
 from app.models import User, UserRole
 from app.schemas import (
     LoginRequest, TokenResponse, UserCreate, UserResponse,
-    ChangePasswordRequest, SetupAdminRequest,
+    ChangePasswordRequest, SetupAdminRequest, UpdateProfileRequest,
 )
 from app.dependencies import (
     hash_password, verify_password, create_access_token,
@@ -50,6 +50,7 @@ async def register(
         hashed_password=hash_password(data.password),
         role=data.role.value,
         email=data.email,
+        display_name=data.display_name,
     )
     db.add(user)
     await db.flush()
@@ -131,6 +132,25 @@ async def get_me(current_user: User = Depends(get_current_user)):
     """获取当前登录用户信息"""
     if not current_user:
         raise HTTPException(status_code=401, detail="未认证")
+    return current_user
+
+
+@router.put("/me", response_model=UserResponse)
+async def update_profile(
+    data: UpdateProfileRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role(
+        [UserRole.ADMIN, UserRole.HR, UserRole.INTERVIEWER]
+    )),
+):
+    """更新当前用户资料（显示姓名 display_name；空串=清除并回退登录名）"""
+    updates = data.model_dump(exclude_unset=True)
+    if "display_name" in updates:
+        dn = (updates["display_name"] or "").strip()
+        current_user.display_name = dn or None
+    await db.flush()
+    await db.refresh(current_user)
+    logger.info("更新资料: username=%s display_name=%s", current_user.username, current_user.display_name)
     return current_user
 
 

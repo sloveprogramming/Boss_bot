@@ -1,7 +1,7 @@
 """Pydantic Schemas — API 请求/响应数据模型"""
 from app.schemas.auth import (
     LoginRequest, TokenResponse, UserCreate,
-    SetupAdminRequest, ChangePasswordRequest, UserResponse,
+    SetupAdminRequest, ChangePasswordRequest, UserResponse, UpdateProfileRequest,
 )
 from app.schemas.candidate import (
     CandidateCreate, CandidateUpdate, CandidateResponse, CandidateListResponse,
@@ -31,7 +31,7 @@ from app.schemas.exam_analysis import (
 __all__ = [
     # auth
     "LoginRequest", "TokenResponse", "UserCreate",
-    "SetupAdminRequest", "ChangePasswordRequest", "UserResponse",
+    "SetupAdminRequest", "ChangePasswordRequest", "UserResponse", "UpdateProfileRequest",
     # candidate / talent pool
     "CandidateCreate", "CandidateUpdate", "CandidateResponse", "CandidateListResponse",
     "TalentPoolResponse", "TalentPoolListResponse",

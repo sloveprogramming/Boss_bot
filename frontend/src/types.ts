@@ -5,6 +5,8 @@ export interface User {
   username: string;
   role: "admin" | "hr" | "interviewer" | "candidate" | string;
   email?: string | null;
+  /** 显示姓名（可空；空则各展示处回退 username） */
+  display_name?: string | null;
   is_active: boolean;
 }
 

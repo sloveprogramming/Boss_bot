@@ -5,7 +5,10 @@
   输入：岗位、薪资、学历（+ 可选补充说明）
   输出：Markdown 结构化 JD（岗位职责 / 任职要求 / 加分项 / 薪资福利），SSE 逐字推送
   合规：提示词内置《就业促进法》反歧视红线，禁止性别/年龄/婚育/地域等限定表述
+         （红线抽为共享常量 agents/company_profile.JD_COMPLIANCE_REDLINES，与"全网参考"共用）
   一致性：注入 get_position_standards() 岗位专项标准，使 JD 与简历评分锚点保持一致
+  全网参考（reference=true）：先抓取全网同类真实 JD 作素材，再结合公司档案适配本司草稿，
+         SSE 事件顺序：{"sources"} →（可选 {"notes"}）→ {"text"}* → data:[DONE]
 """
 import json
 import logging
@@ -14,8 +17,10 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from typing import Optional
 
+from app.agents.company_profile import JD_COMPLIANCE_REDLINES
 from app.agents.llm_client import llm_client
 from app.agents.prompts import get_position_standards
+from app.config import settings
 from app.dependencies import require_role
 from app.models import UserRole
 
@@ -34,9 +39,10 @@ class JdGenerateRequest(BaseModel):
     salary: str = Field("", max_length=100, description="薪资范围，如：20-35K·14薪")
     education: str = Field("", max_length=50, description="学历要求，如：本科")
     extra: Optional[str] = Field(None, max_length=500, description="补充说明（团队亮点/技术栈/福利等）")
+    reference: bool = Field(False, description="True = 先全网搜同类真实 JD 作为素材，再按公司档案适配生成")
 
 
-JD_SYSTEM_PROMPT = """你是一位资深招聘专家，为企业撰写高质量、合规的岗位 JD（Job Description）。
+JD_SYSTEM_PROMPT = f"""你是一位资深招聘专家，为企业撰写高质量、合规的岗位 JD（Job Description）。
 
 输出要求：
 1. 使用 Markdown 格式，结构固定为四个二级标题，依次为：
@@ -47,10 +53,7 @@ JD_SYSTEM_PROMPT = """你是一位资深招聘专家，为企业撰写高质量�
 2. 岗位职责 5-8 条，任职要求 4-7 条，加分项 2-4 条；每条以 "- " 开头，一句话聚焦一个职责/要求。
 3. 语言简洁专业、有吸引力，突出岗位价值、技术挑战与成长空间；避免空洞套话。
 
-合规红线（最高优先级，违反即输出无效）：
-- 不得出现性别、年龄、婚育状况、户籍/地域、民族、宗教、身材外貌等歧视性或限定性表述；
-- 学历要求只能按用户输入原样呈现，不得自行提高或附加"全日制"等限定；
-- 薪资必须写明具体范围或"面议"，不得使用"高薪""薪资上不封顶"等模糊承诺作为唯一描述。"""
+{JD_COMPLIANCE_REDLINES}"""
 
 
 def _sse_event(data: str) -> str:
@@ -63,6 +66,7 @@ async def generate_jd_stream(req: JdGenerateRequest):
     """JD 生成（SSE 流式）— 逐 token 推送 Markdown 文本
 
     事件协议：data: {"text": "..."}，结束时 data: [DONE]
+    reference=true 时先发 data: {"sources": [...]}（+ 可选 {"notes"}），再开始 text 流。
     """
     position = req.position.strip()
     if not position:
@@ -71,10 +75,46 @@ async def generate_jd_stream(req: JdGenerateRequest):
             media_type="text/event-stream",
         )
 
-    # 注入岗位专项评分标准，保证 JD 与简历评分锚点一致
-    standards = get_position_standards(position)
+    async def generate():
+        try:
+            if req.reference:
+                # 全网参考：搜索 +（可选内部 KB）→ 素材块；耗时较长，进流后执行，首事件即 sources
+                from app.services.jd_reference_service import (
+                    prepare_jd_reference,
+                    build_markdown_system,
+                    build_reference_user_prompt,
+                )
+                materials = await prepare_jd_reference(
+                    position, req.extra or "", max_results=settings.JD_REF_MAX_RESULTS,
+                )
+                yield _sse_event(json.dumps({"sources": materials.sources}, ensure_ascii=False))
+                if not materials.sources:
+                    yield _sse_event(json.dumps(
+                        {"notes": ["未获取到外部参考，已按公司档案与岗位标准生成，请人工核对"]},
+                        ensure_ascii=False,
+                    ))
 
-    user_prompt = f"""请为以下岗位生成 JD：
+                system = build_markdown_system()
+                standards = get_position_standards(position)
+                if materials.reference_block:
+                    user_prompt = build_reference_user_prompt(
+                        position, req.salary, req.education, req.extra or "", materials, standards,
+                    )
+                else:
+                    user_prompt = (
+                        f"请为以下岗位生成一份适配我司的 JD：\n\n"
+                        f"- 岗位名称：{position}\n"
+                        f"- 薪资范围：{req.salary or '面议'}\n"
+                        f"- 学历要求：{req.education or '不限'}\n"
+                        f"- 补充说明：{req.extra or '无'}{standards}\n"
+                        f"（本次未获取到外部参考素材，凭你的行业知识并结合公司档案生成。）\n\n"
+                        f"直接输出 Markdown JD，不要输出任何解释性文字。"
+                    )
+            else:
+                # 普通生成：保持原逻辑
+                system = JD_SYSTEM_PROMPT
+                standards = get_position_standards(position)
+                user_prompt = f"""请为以下岗位生成 JD：
 
 - 岗位名称：{position}
 - 薪资范围：{req.salary or "面议"}
@@ -83,17 +123,14 @@ async def generate_jd_stream(req: JdGenerateRequest):
 
 直接输出 Markdown JD，不要输出任何解释性文字。"""
 
-    messages = [{"role": "user", "content": user_prompt}]
-
-    async def generate():
-        try:
+            messages = [{"role": "user", "content": user_prompt}]
             full = ""
             async for delta in llm_client.stream_chat(
-                JD_SYSTEM_PROMPT, messages, temperature=0.7, max_tokens=2048,
+                system, messages, temperature=0.7, max_tokens=2048,
             ):
                 full += delta
                 yield _sse_event(json.dumps({"text": delta}, ensure_ascii=False))
-            logger.info("JD 生成完成: position=%s len=%d", position, len(full))
+            logger.info("JD 生成完成: position=%s reference=%s len=%d", position, req.reference, len(full))
         except Exception as e:
             logger.exception("JD 生成失败: position=%s", position)
             yield _sse_event(json.dumps({"error": f"生成失败：{e}"}, ensure_ascii=False))

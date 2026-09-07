@@ -8,6 +8,7 @@ interface AuthCtx {
   login: (username: string, password: string) => Promise<void>;
   register: (data: { username: string; password: string; role?: string; email?: string }) => Promise<void>;
   logout: () => void;
+  updateProfile: (data: { display_name?: string | null }) => Promise<void>;
 }
 
 const Ctx = createContext<AuthCtx>(null!);
@@ -43,5 +44,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = () => { clearAuth(); setUser(null); location.href = "/login"; };
 
-  return <Ctx.Provider value={{ user, loading, login, register, logout }}>{children}</Ctx.Provider>;
+  const updateProfile = async (d: { display_name?: string | null }) => {
+    const { data: u } = await api.updateProfile(d);
+    setUser(u);
+    localStorage.setItem("recruit_user", JSON.stringify(u));
+  };
+
+  return (
+    <Ctx.Provider value={{ user, loading, login, register, logout, updateProfile }}>{children}</Ctx.Provider>
+  );
 }

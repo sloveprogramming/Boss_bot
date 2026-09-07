@@ -22,6 +22,7 @@ class User(Base):
     hashed_password = Column(String(255), nullable=False)                    # bcrypt 哈希后的密码
     role = Column(String(20), default=UserRole.HR.value, nullable=False)     # 角色
     email = Column(String(200), nullable=True)                               # 邮箱
+    display_name = Column(String(100), nullable=True)                        # 显示姓名（空则展示端回退 username）
     is_active = Column(Boolean, default=True)                                # 是否启用
 
     created_at = Column(DateTime, default=datetime.utcnow)

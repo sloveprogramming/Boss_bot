@@ -8,13 +8,15 @@
 状态机： pending → received → running → success | failure
 """
 from datetime import datetime
+import enum
 from sqlalchemy import (
     Column, Integer, String, Text, JSON, DateTime, ForeignKey, Index, func
 )
 from app.database import Base
 
 
-class TaskStatus:
+class TaskStatus(str, enum.Enum):
+    """分析任务状态（字符串枚举：兼容 .value 取值与直接落库两种写法）"""
     PENDING = "pending"     # 已入队，等待 worker 领取
     RECEIVED = "received"   # worker 已领取，准备执行
     RUNNING = "running"     # 执行中
