@@ -388,7 +388,7 @@ export default function EmailTemplates() {
                 {!isNew && selected?.is_system && (
                   <Button variant="ghost" onClick={resetTemplate} title="恢复内置默认文案"><RotateCcw size={15} /> 恢复默认</Button>
                 )}
-                {!isNew && selectedId != null && (
+                {!isNew && selected && (
                   <Button variant="ghost" className="text-rose-500 hover:text-rose-600"
                     onClick={() => removeTemplate(selected)}><Trash2 size={15} /> 删除</Button>
                 )}
