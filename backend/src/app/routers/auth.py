@@ -1,5 +1,6 @@
 """认证 API — 注册 / 登录 / 当前用户 / 修改密码"""
 import logging
+from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -131,6 +132,29 @@ async def get_me(current_user: User = Depends(get_current_user)):
     if not current_user:
         raise HTTPException(status_code=401, detail="未认证")
     return current_user
+
+
+@router.get("/users", response_model=List[UserResponse])
+async def list_users(
+    role: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role([UserRole.ADMIN, UserRole.HR])),
+):
+    """列出可指派的用户（供候选人"负责人"下拉）。
+
+    - admin：可传 ``?role=hr`` 等过滤；不传则返回全部启用用户。
+    - HR：仅返回 HR 角色最小集（防通过列表接口遍历他人账号）。
+    """
+    query = select(User).where(User.is_active.is_(True))
+    if current_user.role == UserRole.ADMIN.value:
+        if role:
+            query = query.where(User.role == role)
+    else:
+        # HR 只能看到同为 HR 的负责人候选（不含 admin/interviewer）
+        query = query.where(User.role == UserRole.HR.value)
+    query = query.order_by(User.id)
+    result = await db.execute(query)
+    return result.scalars().all()
 
 
 @router.post("/change-password")

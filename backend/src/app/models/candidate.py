@@ -2,7 +2,7 @@
 # 导入datetime，用于时间戳字段的默认值
 from datetime import datetime
 # 导入SQLAlchemy列类型
-from sqlalchemy import Column, Integer, String, DateTime, Float, Text, Enum, JSON
+from sqlalchemy import Column, Integer, String, DateTime, Float, Text, Enum, JSON, ForeignKey
 # 导入关系映射（可用于表关联）
 from sqlalchemy.orm import relationship
 # 导入数据库基类，所有ORM模型需继承它
@@ -55,6 +55,9 @@ class Candidate(Base):
     # 人才池相关信息
     talent_pool_id = Column(Integer, nullable=True)         # 关联的人才池记录ID
     talent_pool_reason = Column(String(500), nullable=True)  # 进入人才池的原因
+
+    # 归属 — 负责人 HR（NULL 表示未指派；admin 全量可见）
+    owner_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
 
     # 标签：存储技能标签，如["Python", "Django", "MySQL"]
     tags = Column(JSON, default=list)

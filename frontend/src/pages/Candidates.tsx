@@ -1,13 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Plus, Search, Trash2, ChevronLeft, ChevronRight, Upload, FileText, X } from "lucide-react";
 import { api, errDetail } from "../lib/api";
 import { Badge, Button, Card, EmptyState, Field, Input, Modal, PageHeader, Select, Spinner, Textarea, useToast } from "../components/ui";
-import { STATUS_META, statusMeta, type Candidate } from "../types";
+import { useAuth } from "../contexts/AuthContext";
+import { STATUS_META, statusMeta, type Candidate, type User } from "../types";
 
 export default function Candidates() {
   const nav = useNavigate();
   const { toast } = useToast();
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
 
   const [list, setList] = useState<Candidate[]>([]);
   const [total, setTotal] = useState(0);
@@ -22,8 +25,32 @@ export default function Candidates() {
   const [previewBusy, setPreviewBusy] = useState(false);
   const [previewMeta, setPreviewMeta] = useState<{ experience_years?: number | null; skills: string[] }>({ experience_years: null, skills: [] });
   const [jd, setJd] = useState("");
+  const [hrUsers, setHrUsers] = useState<User[]>([]);   // 可指派负责人候选
+  const [ownerId, setOwnerId] = useState("");           // 新建时的负责人 id（仅 admin）
   const fileRef = useRef<HTMLInputElement>(null);
   const pageSize = 20;
+
+  // 可指派给候选人的账号：admin=自己 + 全部 HR；HR=同名 HR（用于 owner 列映射）
+  useEffect(() => {
+    if (!user) return;
+    api.users.list(isAdmin ? undefined : { role: "hr" })
+      .then((r) => setHrUsers(r.data.filter((u) => u.role === "admin" || u.role === "hr")))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin]);
+
+  // admin 新建默认归属自己
+  useEffect(() => {
+    if (isAdmin && ownerId === "" && user) setOwnerId(String(user.id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin, hrUsers.length > 0]);
+
+  const ownerNameMap = useMemo(() => {
+    const m: Record<string, string> = {};
+    hrUsers.forEach((u) => { m[u.id] = u.username; });
+    if (user) m[user.id] = user.username; // 保证 admin 自己的归属也能显示
+    return m;
+  }, [hrUsers, user]);
 
   const load = useCallback(async (p = page) => {
     setLoading(true);
@@ -49,6 +76,7 @@ export default function Candidates() {
     setResumeFile(null);
     setPreviewMeta({ experience_years: null, skills: [] });
     setJd("");
+    setOwnerId(isAdmin && user ? String(user.id) : ""); // admin 默认归属自己
     if (fileRef.current) fileRef.current.value = "";
   };
 
@@ -89,6 +117,7 @@ export default function Candidates() {
           email: form.email || undefined,
           experience_years: previewMeta.experience_years ?? null,
           job_description: jd,
+          ...(isAdmin && ownerId ? { owner_user_id: Number(ownerId) } : {}),
         });
         resetCreateModal();
         if (data.warning) {
@@ -103,6 +132,7 @@ export default function Candidates() {
           phone: form.phone || null,
           email: form.email || null,
           tags: [],
+          ...(isAdmin && ownerId ? { owner_user_id: Number(ownerId) } : {}),
         });
         resetCreateModal();
         toast(`候选人「${data.name}」创建成功`);
@@ -163,6 +193,7 @@ export default function Candidates() {
               <tr className="text-left text-xs text-slate-400 border-b border-slate-100">
                 <th className="px-5 py-3 font-medium">姓名</th>
                 <th className="px-5 py-3 font-medium">应聘岗位</th>
+                <th className="px-5 py-3 font-medium">负责人</th>
                 <th className="px-5 py-3 font-medium">状态</th>
                 <th className="px-5 py-3 font-medium">匹配分</th>
                 <th className="px-5 py-3 font-medium">联系方式</th>
@@ -183,6 +214,9 @@ export default function Candidates() {
                       <span className="ml-2 text-xs text-slate-300">#{c.id}</span>
                     </td>
                     <td className="px-5 py-3.5 text-slate-600">{c.position}</td>
+                    <td className="px-5 py-3.5 text-slate-500">
+                      {c.owner_user_id ? ownerNameMap[c.owner_user_id] || `#${c.owner_user_id}` : "—"}
+                    </td>
                     <td className="px-5 py-3.5"><Badge label={m.label} cls={m.cls} /></td>
                     <td className="px-5 py-3.5">
                       {score != null ? (
@@ -276,6 +310,17 @@ export default function Candidates() {
             <option value="referral">内推</option>
           </Select>
         </Field>
+        {isAdmin && (
+          <Field label="负责人">
+            <Select value={ownerId} onChange={(e) => setOwnerId(e.target.value)}>
+              {hrUsers.filter((u) => u.role === "hr").map((u) => (
+                <option key={u.id} value={String(u.id)}>{u.username}</option>
+              ))}
+              {user && <option value={String(user.id)}>{user.username}（我自己）</option>}
+            </Select>
+            <p className="text-xs text-slate-400 mt-1.5 leading-5">指派负责此候选人的 HR；只有该 HR 能看见并跟进（admin 始终全量）。</p>
+          </Field>
+        )}
         {resumeFile && (
           <Field label="岗位描述（可选，用于 AI 匹配度分析）">
             <Textarea value={jd} onChange={(e) => setJd(e.target.value)} rows={3}

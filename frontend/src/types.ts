@@ -24,9 +24,18 @@ export interface Candidate {
   status: CandidateStatus;
   match_score?: number | null;
   tags: string[];
+  owner_user_id?: number | null; // 归属负责人（HR/管理员）用户 id；null=未指派
   talent_pool_id?: number | null;
   created_at: string;
   updated_at: string;
+}
+
+/** 改派候选人负责人（PUT /api/candidates/{id}/owner）的返回 */
+export interface OwnerReassignResult {
+  previous_owner_user_id: number | null;
+  previous_owner_name: string | null;
+  owner_user_id: number;
+  owner_name: string;
 }
 
 export interface Page<T> {

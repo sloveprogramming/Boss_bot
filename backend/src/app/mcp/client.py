@@ -4,8 +4,9 @@
 - 直接调用（嵌入式，零开销，LangGraph 节点使用）
 - MCP 协议连接（stdio，外部 MCP Client 使用）
 """
+import inspect
 import json
-from typing import Any
+from typing import Any, Optional
 from app.mcp.tools import (
     query_policy_docs,
     query_candidates,
@@ -42,12 +43,19 @@ def get_tool_definitions_openai() -> list[dict[str, Any]]:
     ]
 
 
-async def execute_tool_directly(name: str, arguments: dict[str, Any]) -> str:
+async def execute_tool_directly(
+    name: str,
+    arguments: dict[str, Any],
+    user: Optional[Any] = None,
+) -> str:
     """直接执行工具（跳过 MCP 协议，用于 LangGraph 节点）
 
     Args:
         name: 工具名称
         arguments: 工具参数
+        user: 调用者（User ORM / 含 id/username/role 的轻量对象）。
+              仅注入给签名接受 user 的工具（候选人数据类工具做行级隔离）；
+              None 表示受信全量上下文（MCP stdio / 后台任务）。
 
     Returns:
         工具执行结果（JSON 字符串）
@@ -56,4 +64,6 @@ async def execute_tool_directly(name: str, arguments: dict[str, Any]) -> str:
     if not tool_fn:
         return json.dumps({"error": f"未知工具: {name}"}, ensure_ascii=False)
 
+    if user is not None and "user" in inspect.signature(tool_fn).parameters:
+        arguments = {**arguments, "user": user}
     return await tool_fn(**arguments)

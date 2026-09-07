@@ -16,6 +16,7 @@ async def send_email(
     subject: Optional[str] = None,
     body: Optional[str] = None,
     extra_vars: Optional[dict] = None,
+    user=None,
 ) -> str:
     """发送邮件给指定候选人。
 
@@ -29,6 +30,7 @@ async def send_email(
         subject: 自定义邮件主题（仅在 template="custom" 时使用）
         body: 自定义邮件正文（仅在 template="custom" 时使用，支持 {name} {position} 变量）
         extra_vars: 模板额外变量，如 {"survey_link": "...", "deadline": "..."}
+        user: 调用者（HR/admin/interviewer）；None=受信全量
 
     Returns:
         JSON 字符串：发送结果
@@ -37,6 +39,16 @@ async def send_email(
     from app.database import async_session_factory
     db = await async_session_factory()
     try:
+        # 越权访问校验（不泄露存在性）；None/admin 直接放行
+        from app.dependencies.scope import candidate_accessible
+        if not await candidate_accessible(db, user, candidate_id):
+            logger.warning(
+                "[MCP审计] send_email 拒绝越权访问: candidate_id=%s", candidate_id,
+            )
+            return json.dumps({
+                "success": False,
+                "error": f"候选人不存在或无权访问: {candidate_id}",
+            }, ensure_ascii=False)
         if template == "custom":
             if not subject or not body:
                 logger.warning("[MCP审计] send_email 参数缺失: candidate_id=%s template=custom", candidate_id)

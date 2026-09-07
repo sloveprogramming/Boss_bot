@@ -2,11 +2,15 @@
 import json
 import logging
 import re
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
-from app.models import Resume, Candidate, CandidateStatus, UserRole
-from app.dependencies import require_role
+from app.models import Resume, Candidate, CandidateStatus, UserRole, User
+from app.dependencies import (
+    require_role, get_current_user, ensure_candidate_visible,
+)
 from app.services import resume_analyzer
 from app.schemas import ResumeUploadResponse, ResumeAnalysisResponse
 
@@ -35,14 +39,11 @@ async def upload_resume(
     candidate_id: int = Form(...),          # 候选人ID（表单参数）
     file: UploadFile = File(...),            # 上传的简历文件
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """上传简历文件并解析为纯文本"""
-    # 验证候选人存在
-    from sqlalchemy import select
-    result = await db.execute(select(Candidate).where(Candidate.id == candidate_id))
-    candidate = result.scalar_one_or_none()
-    if not candidate:
-        raise HTTPException(status_code=404, detail="候选人不存在")
+    # 验证候选人存在且当前 HR 可见
+    await ensure_candidate_visible(db, current_user, candidate_id)
 
     # 读取上传文件内容
     content = await file.read()
@@ -78,6 +79,7 @@ async def analyze_resume(
     resume_id: int,
     job_description: str = Form(""),  # 岗位描述（可选，用于匹配度分析）
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """分析简历：调用LLM进行结构化提取和匹配度评分"""
     # 验证简历存在
@@ -87,6 +89,8 @@ async def analyze_resume(
     resume = result.scalar_one_or_none()
     if not resume:
         raise HTTPException(status_code=404, detail="简历不存在")
+    # 数据范围校验：候选人须对当前 HR 可见
+    await ensure_candidate_visible(db, current_user, resume.candidate_id)
 
     # 执行分析
     try:
@@ -120,8 +124,10 @@ async def analyze_resume(
 async def get_candidate_resume_analysis(
     candidate_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """获取候选人最新的简历分析结果"""
+    await ensure_candidate_visible(db, current_user, candidate_id)
     result = await resume_analyzer.get_resume_analysis(candidate_id, db)
     if not result:
         raise HTTPException(status_code=404, detail="未找到简历分析结果")
@@ -206,7 +212,9 @@ async def quick_add_candidate(
     source: str = Form("manual"),
     experience_years: str = Form(""),
     job_description: str = Form(""),
+    owner_user_id: Optional[int] = Form(None),  # 负责人（仅 admin 指派有效）
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """一步建档：解析简历 → 创建候选人+简历 → 立即 AI 分析
 
@@ -232,6 +240,19 @@ async def quick_add_candidate(
         except (TypeError, ValueError):
             ey = None
 
+    # 归属规则：HR 建档归属自己（忽略传入 owner_user_id）；admin 可指派给某 HR/admin
+    owner_id = current_user.id
+    if current_user.role == UserRole.ADMIN.value and owner_user_id is not None:
+        target = (await db.execute(
+            select(User).where(User.id == owner_user_id)
+        )).scalar_one_or_none()
+        if (
+            not target or not target.is_active
+            or target.role not in (UserRole.ADMIN.value, UserRole.HR.value)
+        ):
+            raise HTTPException(status_code=400, detail="指定的负责人不存在或不是 HR/admin")
+        owner_id = target.id
+
     candidate = Candidate(
         name=name,
         position=position,
@@ -239,6 +260,7 @@ async def quick_add_candidate(
         email=(email or "").strip() or None,
         source=(source or "manual").strip() or "manual",
         experience_years=ey,
+        owner_user_id=owner_id,
     )
     db.add(candidate)
     await db.flush()
@@ -293,6 +315,7 @@ async def analyze_resume_stream(
     resume_id: int,
     job_description: str = Form(""),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """流式分析简历（SSE）
 
@@ -312,6 +335,8 @@ async def analyze_resume_stream(
     resume = result.scalar_one_or_none()
     if not resume:
         raise HTTPException(status_code=404, detail="简历不存在")
+    # 数据范围校验：候选人须对当前 HR 可见
+    await ensure_candidate_visible(db, current_user, resume.candidate_id)
 
     async def generate():
         from app.agents import llm_client, RESUME_ANALYSIS_SYSTEM, RESUME_ANALYSIS_PROMPT

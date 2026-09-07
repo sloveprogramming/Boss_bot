@@ -1,12 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
-  ArrowLeft, Upload, Sparkles, Workflow, FileText, CalendarClock,
+  ArrowLeft, Upload, Sparkles, Workflow, FileText, CalendarClock, UserCog,
   CheckCircle2, XCircle, Lightbulb, AlertTriangle,
 } from "lucide-react";
 import { api, errDetail } from "../lib/api";
-import { Badge, Button, Card, Field, Modal, PageHeader, Spinner, Textarea, useToast } from "../components/ui";
-import { statusMeta, type Candidate, type Interview, type Questionnaire, type ResumeAnalysis } from "../types";
+import { Badge, Button, Card, Field, Modal, PageHeader, Select, Spinner, Textarea, useToast } from "../components/ui";
+import { useAuth } from "../contexts/AuthContext";
+import { statusMeta, type Candidate, type Interview, type Questionnaire, type ResumeAnalysis, type User } from "../types";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -33,6 +34,28 @@ export default function CandidateDetail() {
   const [busy, setBusy] = useState("");
   const [jdOpen, setJdOpen] = useState(false);
   const [jd, setJd] = useState("");
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
+  const [hrUsers, setHrUsers] = useState<User[]>([]);
+  const [reassignOpen, setReassignOpen] = useState(false);
+  const [newOwnerId, setNewOwnerId] = useState("");
+  const [reassigning, setReassigning] = useState(false);
+
+  // 负责人候选账号（HR；仅用于 owner_user_id → 姓名映射 + 改派下拉）
+  useEffect(() => {
+    if (!user) return;
+    api.users.list({ role: "hr" })
+      .then((r) => setHrUsers(r.data))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const ownerName = useMemo(() => {
+    const m: Record<number, string> = {};
+    hrUsers.forEach((u) => { m[u.id] = u.username; });
+    if (user) m[user.id] = user.username; // 管理员自己名下的候选也能显示姓名
+    return m;
+  }, [hrUsers, user]); // eslint-disable-line
 
   const loadAll = useCallback(async () => {
     try {
@@ -48,6 +71,23 @@ export default function CandidateDetail() {
   }, [cid]); // eslint-disable-line
 
   useEffect(() => { loadAll(); }, [loadAll]);
+
+  const openReassign = () => {
+    setNewOwnerId(c?.owner_user_id ? String(c.owner_user_id) : (user ? String(user.id) : ""));
+    setReassignOpen(true);
+  };
+
+  const doReassign = async () => {
+    if (!newOwnerId) { toast("请选择新的负责人", "err"); return; }
+    setReassigning(true);
+    try {
+      const { data } = await api.candidates.reassignOwner(cid, Number(newOwnerId));
+      toast(`负责人已改为「${data.owner_name}」`);
+      setReassignOpen(false);
+      loadAll();
+    } catch (e) { toast(errDetail(e), "err"); }
+    finally { setReassigning(false); }
+  };
 
   if (loading) return <Spinner />;
   if (!c) return <p className="text-slate-400">候选人不存在</p>;
@@ -115,6 +155,9 @@ export default function CandidateDetail() {
           </span>
         )}
         <div className="ml-auto flex gap-2">
+          {isAdmin && (
+            <Button variant="outline" onClick={openReassign} title="将候选人改派给其他 HR"><UserCog size={14} /> 改派</Button>
+          )}
           <Button variant="outline" loading={busy === "q"} onClick={sendQuestionnaire}><FileText size={14} /> 发送问卷</Button>
           <Button loading={busy === "auto"} onClick={autoProcess}><Workflow size={14} /> 全自动流程</Button>
         </div>
@@ -125,7 +168,9 @@ export default function CandidateDetail() {
         <div>
           <Section title="基本信息">
             <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2.5 text-sm">
-              {[["应聘岗位", c.position], ["电话", c.phone], ["邮箱", c.email], ["工作年限", c.experience_years != null ? `${c.experience_years} 年` : null],
+              {[["应聘岗位", c.position],
+                ["负责人", c.owner_user_id ? ownerName[c.owner_user_id] || `#${c.owner_user_id}` : null],
+                ["电话", c.phone], ["邮箱", c.email], ["工作年限", c.experience_years != null ? `${c.experience_years} 年` : null],
                 ["来源", c.source], ["创建时间", new Date(c.created_at).toLocaleString()],
               ].map(([k, v]) => (
                 <div key={k as string} className="contents">
@@ -261,6 +306,27 @@ export default function CandidateDetail() {
           )}
         </div>
       </div>
+
+      {/* 改派负责人弹窗（仅 admin） */}
+      <Modal open={reassignOpen} onClose={() => setReassignOpen(false)} title="改派负责人">
+        <p className="text-sm text-slate-500 mb-4 -mt-1">
+          「{c.name}」当前负责人：{c.owner_user_id ? ownerName[c.owner_user_id] || `#${c.owner_user_id}` : "未指派"}。
+          改派后原 HR 将立即无法查看该候选人。
+        </p>
+        <Field label="新的负责人">
+          <Select value={newOwnerId} onChange={(e) => setNewOwnerId(e.target.value)}>
+            <option value="" disabled>请选择负责人</option>
+            {hrUsers.map((u) => (
+              <option key={u.id} value={String(u.id)}>{u.username}</option>
+            ))}
+            {user && <option value={String(user.id)}>{user.username}（我自己）</option>}
+          </Select>
+        </Field>
+        <div className="flex justify-end gap-2 mt-5 pt-4 border-t border-slate-100">
+          <Button variant="ghost" onClick={() => setReassignOpen(false)}>取消</Button>
+          <Button loading={reassigning} onClick={doReassign}><UserCog size={14} /> 确认改派</Button>
+        </div>
+      </Modal>
 
       {/* JD 输入弹窗 */}
       <Modal open={jdOpen} onClose={() => setJdOpen(false)} title="岗位 JD（用于 AI 匹配分析）">

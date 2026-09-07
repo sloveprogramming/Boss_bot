@@ -3,11 +3,14 @@ import logging
 from datetime import datetime, timedelta
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
-from app.models import Interview, Candidate, UserRole
-from app.dependencies import require_role
+from app.models import Interview, Candidate, UserRole, User
+from app.dependencies import (
+    require_role, get_current_user,
+    ensure_candidate_visible, ensure_interview_visible, interview_scope_cond,
+)
 from app.services import scheduler
 from app.schemas import (
     InterviewSlotRequest, InterviewSlotResponse,
@@ -25,9 +28,13 @@ router = APIRouter(
 
 
 @router.post("/generate-slots", response_model=InterviewSlotResponse)
-async def generate_slots(data: InterviewSlotRequest,
-                          db: AsyncSession = Depends(get_db)):
-    """根据约束条件生成可选的面试时间段"""
+async def generate_slots(
+    data: InterviewSlotRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role([UserRole.ADMIN, UserRole.HR])),
+):
+    """根据约束条件生成可选的面试时间段（HR/admin；interviewer 不可排期）"""
+    await ensure_candidate_visible(db, current_user, data.candidate_id)
     try:
         result = await scheduler.generate_slots(
             candidate_id=data.candidate_id,
@@ -56,8 +63,13 @@ async def generate_slots(data: InterviewSlotRequest,
 
 
 @router.post("/confirm-slot", response_model=InterviewResponse)
-async def confirm_slot(data: SlotConfirm, db: AsyncSession = Depends(get_db)):
-    """候选人确认选定的面试时间"""
+async def confirm_slot(
+    data: SlotConfirm,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """候选人确认选定的面试时间（须为可见面试）"""
+    await ensure_interview_visible(db, current_user, data.interview_id)
     try:
         interview = await scheduler.confirm_slot(
             interview_id=data.interview_id,
@@ -93,9 +105,13 @@ async def confirm_slot(data: SlotConfirm, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/manual", response_model=InterviewResponse)
-async def manual_schedule(data: ManualScheduleRequest,
-                          db: AsyncSession = Depends(get_db)):
+async def manual_schedule(
+    data: ManualScheduleRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role([UserRole.ADMIN, UserRole.HR])),
+):
     """HR 手动指定面试时间直接排期（不依赖 AI 生成时段）"""
+    await ensure_candidate_visible(db, current_user, data.candidate_id)
     try:
         interview = await scheduler.schedule_manual(
             candidate_id=data.candidate_id,
@@ -135,9 +151,13 @@ async def manual_schedule(data: ManualScheduleRequest,
 
 
 @router.post("/feedback")
-async def submit_feedback(data: InterviewFeedback,
-                           db: AsyncSession = Depends(get_db)):
-    """提交面试反馈（面试官填写）"""
+async def submit_feedback(
+    data: InterviewFeedback,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """提交面试反馈（面试官填写；仅本人参与/HR 名下面试可提交）"""
+    await ensure_interview_visible(db, current_user, data.interview_id)
     try:
         result = await scheduler.submit_feedback(
             interview_id=data.interview_id,
@@ -153,14 +173,26 @@ async def submit_feedback(data: InterviewFeedback,
 
 @router.get("/candidate/{candidate_id}")
 async def get_candidate_interviews(
-    candidate_id: int, db: AsyncSession = Depends(get_db)
+    candidate_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """获取指定候选人的所有面试记录"""
-    result = await db.execute(
-        select(Interview)
-        .where(Interview.candidate_id == candidate_id)
-        .order_by(Interview.created_at.desc())
-    )
+    """获取指定候选人的所有面试记录
+
+    - HR：仅候选人归属自己的面试
+    - interviewer：仅本人作为面试官参与的场次（看不到同候选人其他面试官的场次）
+    """
+    await ensure_candidate_visible(db, current_user, candidate_id)
+    query = select(Interview).where(Interview.candidate_id == candidate_id)
+    if current_user.role == UserRole.INTERVIEWER.value:
+        query = query.where(
+            func.json_contains(
+                Interview.interviewers,
+                func.json_quote(current_user.username),
+            )
+        )
+    query = query.order_by(Interview.created_at.desc())
+    result = await db.execute(query)
     interviews = result.scalars().all()
 
     cand_result = await db.execute(
@@ -194,9 +226,11 @@ async def get_calendar_interviews(
     end: str = Query(..., description="结束日期 YYYY-MM-DD（含）"),
     candidate_id: Optional[int] = Query(None, description="按候选人过滤（缺省全部）"),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """月历数据：指定日期范围内已确认时间的面试 + 待确认（未排时间）的面试
 
+    数据范围：HR 仅看自己名下候选人的面试；interviewer 仅看本人在名单的场次。
     必须声明在 GET /{interview_id} 之前，避免 'calendar' 被当作 int 路径参数。
     """
     try:
@@ -205,11 +239,15 @@ async def get_calendar_interviews(
     except ValueError:
         raise HTTPException(status_code=400, detail="日期格式须为 YYYY-MM-DD")
 
+    scope_cond = interview_scope_cond(current_user)
+
     filters = [
         Interview.confirmed_start.isnot(None),
         Interview.confirmed_start >= start_dt,
         Interview.confirmed_start < end_dt,
     ]
+    if scope_cond is not None:
+        filters.append(scope_cond)
     if candidate_id is not None:
         filters.append(Interview.candidate_id == candidate_id)
 
@@ -240,21 +278,25 @@ async def get_calendar_interviews(
         })
 
     # 待确认/未排期：无 confirmed_start 但已有拟议时段（可能在流程中途）
+    u_filters = [
+        Interview.confirmed_start.is_(None),
+        Interview.status.in_(["pending", "awaiting_confirm", "rescheduling"]),
+    ]
+    if scope_cond is not None:
+        u_filters.append(scope_cond)
+    if candidate_id is not None:
+        u_filters.append(Interview.candidate_id == candidate_id)
+
     u_result = await db.execute(
         select(Interview, Candidate)
         .join(Candidate, Interview.candidate_id == Candidate.id)
-        .where(
-            Interview.confirmed_start.is_(None),
-            Interview.status.in_(["pending", "awaiting_confirm", "rescheduling"]),
-        )
+        .where(*u_filters)
         .order_by(Interview.created_at.desc())
     )
     unconfirmed = []
     for interview, cand in u_result.all():
         slots = interview.proposed_slots if isinstance(interview.proposed_slots, list) else []
         if not slots:
-            continue
-        if candidate_id is not None and interview.candidate_id != candidate_id:
             continue
         unconfirmed.append({
             "id": interview.id,
@@ -269,8 +311,13 @@ async def get_calendar_interviews(
 
 
 @router.post("/{interview_id}/cancel")
-async def cancel_interview(interview_id: int, db: AsyncSession = Depends(get_db)):
-    """取消面试（HR 在面试管理执行；可取消状态见 InterviewScheduler.cancel_interview）"""
+async def cancel_interview(
+    interview_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role([UserRole.ADMIN, UserRole.HR])),
+):
+    """取消面试（HR/admin；可取消状态见 InterviewScheduler.cancel_interview）"""
+    await ensure_interview_visible(db, current_user, interview_id)
     try:
         result = await scheduler.cancel_interview(interview_id=interview_id, db=db)
         logger.info("面试已取消: interview_id=%s", interview_id)
@@ -281,14 +328,13 @@ async def cancel_interview(interview_id: int, db: AsyncSession = Depends(get_db)
 
 
 @router.get("/{interview_id}", response_model=InterviewResponse)
-async def get_interview(interview_id: int, db: AsyncSession = Depends(get_db)):
-    """获取单条面试记录的详情"""
-    result = await db.execute(
-        select(Interview).where(Interview.id == interview_id)
-    )
-    interview = result.scalar_one_or_none()
-    if not interview:
-        raise HTTPException(status_code=404, detail="面试记录不存在")
+async def get_interview(
+    interview_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """获取单条面试记录的详情（越权 404）"""
+    interview = await ensure_interview_visible(db, current_user, interview_id)
 
     cand_result = await db.execute(
         select(Candidate).where(Candidate.id == interview.candidate_id)

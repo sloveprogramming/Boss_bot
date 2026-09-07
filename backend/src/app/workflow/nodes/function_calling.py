@@ -45,7 +45,8 @@ async def function_calling_node(state: RecruitmentState) -> dict:
             "fc_response": "未接收到查询请求。",
         }
 
-    return await run_function_calling(query)                        # 委托核心函数
+    # 透传发起者（HR/admin）做工具数据隔离；工作流/后台任务无 user 保持全量
+    return await run_function_calling(query, user=state.get("user"))  # 委托核心函数
 
 
 # ===== Function Calling 核心函数（ReAct 多轮循环） =====
@@ -53,6 +54,7 @@ async def run_function_calling(
     query: str,
     system_prompt: str = "",
     history: list | None = None,
+    user=None,
 ) -> dict:
     """ReAct 多轮工具循环
 
@@ -61,6 +63,7 @@ async def run_function_calling(
         system_prompt: 可选自定义系统提示词
         history: 可选历史消息 [{"role": "user"/"assistant", "content": "..."}]
                  由 session_memory 注入，让"刚才那个人"这类指代可解析
+        user: 发起者（用于工具数据范围隔离）；None=受信全量
     """
     tools = get_tool_definitions_openai()
     system = system_prompt or FC_SYSTEM_PROMPT
@@ -133,7 +136,7 @@ async def run_function_calling(
                                func_name, tc.function.arguments)
                 func_args = {}
 
-            result = await execute_tool_directly(func_name, func_args)
+            result = await execute_tool_directly(func_name, func_args, user=user)
             tool_call_records.append({
                 "id": tc.id, "name": func_name, "arguments": func_args,
             })

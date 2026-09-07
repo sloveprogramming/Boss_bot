@@ -5,11 +5,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
-from app.models import Candidate
+from app.models import Candidate, User
 from app.models import UserRole
-from app.dependencies import require_role
+from app.dependencies import (
+    require_role, get_current_user, ensure_candidate_visible, candidate_scope_cond,
+)
 from app.schemas import (
     CandidateCreate, CandidateUpdate, CandidateResponse, CandidateListResponse,
+    CandidateOwnerUpdate,
 )
 
 logger = logging.getLogger(__name__)
@@ -22,13 +25,41 @@ router = APIRouter(
 
 
 @router.post("", response_model=CandidateResponse)
-async def create_candidate(data: CandidateCreate, db: AsyncSession = Depends(get_db)):
-    """创建新候选人记录"""
-    candidate = Candidate(**data.model_dump())  # 用请求数据创建模型实例
+async def create_candidate(
+    data: CandidateCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """创建新候选人记录
+
+    归属规则：HR 建档归属自己（忽略 body.owner_user_id）；admin 可用
+    ``data.owner_user_id`` 指派给某 HR/admin，缺省归属自己。
+    """
+    # 归属校验：admin 指定目标负责人时必须存在且启用、为 HR/admin 角色
+    owner_user_id = current_user.id
+    if (
+        current_user.role == UserRole.ADMIN.value
+        and data.owner_user_id is not None
+    ):
+        target = (await db.execute(
+            select(User).where(User.id == data.owner_user_id)
+        )).scalar_one_or_none()
+        if (
+            not target or not target.is_active
+            or target.role not in (UserRole.ADMIN.value, UserRole.HR.value)
+        ):
+            raise HTTPException(status_code=400, detail="指定的负责人不存在或不是 HR/admin")
+        owner_user_id = target.id
+
+    candidate = Candidate(**data.model_dump(exclude={"owner_user_id"}))
+    candidate.owner_user_id = owner_user_id
     db.add(candidate)
     await db.flush()
     await db.refresh(candidate)  # 刷新获取自增ID
-    logger.info("创建候选人: id=%s name=%s position=%s", candidate.id, candidate.name, candidate.position)
+    logger.info(
+        "创建候选人: id=%s name=%s position=%s owner_user_id=%s",
+        candidate.id, candidate.name, candidate.position, owner_user_id,
+    )
     return candidate
 
 
@@ -40,11 +71,21 @@ async def list_candidates(
     position: Optional[str] = None,           # 按岗位筛选
     search: Optional[str] = None,             # 按姓名/邮箱搜索
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """获取候选人列表（支持分页、过滤、搜索）"""
+    """获取候选人列表（支持分页、过滤、搜索）
+
+    HR 仅能看到自己负责的候选人；admin 全量。
+    """
     # 构建查询
     query = select(Candidate)
     count_query = select(func.count(Candidate.id))
+
+    # 数据范围：HR 只看自己名下；admin 不过滤
+    cond = candidate_scope_cond(current_user)
+    if cond is not None:
+        query = query.where(cond)
+        count_query = count_query.where(cond)
 
     # 按状态过滤
     if status:
@@ -82,24 +123,24 @@ async def list_candidates(
 
 
 @router.get("/{candidate_id}", response_model=CandidateResponse)
-async def get_candidate(candidate_id: int, db: AsyncSession = Depends(get_db)):
-    """获取单个候选人详情"""
-    result = await db.execute(select(Candidate).where(Candidate.id == candidate_id))
-    candidate = result.scalar_one_or_none()
-    if not candidate:
-        raise HTTPException(status_code=404, detail="候选人不存在")
-    return candidate
+async def get_candidate(
+    candidate_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """获取单个候选人详情（越权一律 404）"""
+    return await ensure_candidate_visible(db, current_user, candidate_id)
 
 
 @router.put("/{candidate_id}", response_model=CandidateResponse)
 async def update_candidate(
-    candidate_id: int, data: CandidateUpdate, db: AsyncSession = Depends(get_db)
+    candidate_id: int,
+    data: CandidateUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """更新候选人信息（部分更新）"""
-    result = await db.execute(select(Candidate).where(Candidate.id == candidate_id))
-    candidate = result.scalar_one_or_none()
-    if not candidate:
-        raise HTTPException(status_code=404, detail="候选人不存在")
+    """更新候选人信息（部分更新）—— 仅限本人名下（admin 全量）"""
+    candidate = await ensure_candidate_visible(db, current_user, candidate_id)
 
     # 只更新请求中包含的字段
     for key, value in data.model_dump(exclude_unset=True).items():
@@ -111,15 +152,62 @@ async def update_candidate(
     return candidate
 
 
+@router.put("/{candidate_id}/owner")
+async def reassign_candidate_owner(
+    candidate_id: int,
+    data: CandidateOwnerUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
+):
+    """改派候选人负责人（仅 admin）。
+
+    改派后数据即时对原 HR 不可见（所有读路径动态按 owner 过滤，无缓存副本）。
+    """
+    candidate = await ensure_candidate_visible(db, current_user, candidate_id)
+
+    target = (await db.execute(
+        select(User).where(User.id == data.owner_user_id)
+    )).scalar_one_or_none()
+    if (
+        not target or not target.is_active
+        or target.role not in (UserRole.ADMIN.value, UserRole.HR.value)
+    ):
+        raise HTTPException(status_code=400, detail="目标负责人不存在或不是 HR/admin")
+
+    previous_owner_id = candidate.owner_user_id
+    previous_owner_name = None
+    if previous_owner_id:
+        prev = (await db.execute(
+            select(User).where(User.id == previous_owner_id)
+        )).scalar_one_or_none()
+        previous_owner_name = prev.username if prev else None
+
+    candidate.owner_user_id = target.id
+    await db.flush()
+    await db.refresh(candidate)
+    logger.info(
+        "改派候选人负责人: candidate_id=%s %s -> %s",
+        candidate_id, previous_owner_name, target.username,
+    )
+    return {
+        "candidate_id": candidate.id,
+        "previous_owner_user_id": previous_owner_id,
+        "previous_owner_name": previous_owner_name,
+        "owner_user_id": candidate.owner_user_id,
+        "owner_name": target.username,
+    }
+
+
 @router.delete("/{candidate_id}")
-async def delete_candidate(candidate_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_candidate(
+    candidate_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """删除候选人及其所有关联记录"""
     from app.models import Resume, Questionnaire, QuestionnaireResponse, Interview, Notification, TalentPool
 
-    result = await db.execute(select(Candidate).where(Candidate.id == candidate_id))
-    candidate = result.scalar_one_or_none()
-    if not candidate:
-        raise HTTPException(status_code=404, detail="候选人不存在")
+    candidate = await ensure_candidate_visible(db, current_user, candidate_id)
 
     # 按依赖顺序删除关联记录
     # 1. 问卷回复

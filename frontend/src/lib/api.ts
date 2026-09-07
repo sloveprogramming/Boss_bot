@@ -4,7 +4,7 @@ import type {
   DashboardStats, Questionnaire, Interview, InterviewSlotResponse, TalentPoolItem,
   PipelineOverview, ExamAnalysisItem, CalendarInterviewResponse,
   QuestionnaireOverviewItem, ScoringInsights, ScoringIteration, User,
-  PolicyChatSession, PolicyChatMessage,
+  PolicyChatSession, PolicyChatMessage, OwnerReassignResult,
 } from "../types";
 
 export const TOKEN_KEY = "recruit_token";
@@ -109,6 +109,11 @@ export const api = {
   register: (data: { username: string; password: string; role?: string; email?: string }) =>
     http.post<User>("/api/auth/register", data),
   me: () => http.get<User>("/api/auth/me"),
+  users: {
+    // 可指派的负责人列表：admin 传 ?role= 过滤；HR 请求后端只回 HR 最小集
+    list: (params?: { role?: string }) =>
+      http.get<User[]>("/api/auth/users", { params }),
+  },
 
   dashboardStats: () => http.get<DashboardStats>("/api/dashboard/stats"),
 
@@ -119,6 +124,8 @@ export const api = {
     create: (data: Partial<Candidate>) => http.post<Candidate>("/api/candidates", data),
     update: (id: number, data: Partial<Candidate>) => http.put<Candidate>(`/api/candidates/${id}`, data),
     remove: (id: number) => http.delete(`/api/candidates/${id}`),
+    reassignOwner: (id: number, owner_user_id: number) =>
+      http.put<OwnerReassignResult>(`/api/candidates/${id}/owner`, { owner_user_id }),
   },
 
   resumes: {
@@ -143,6 +150,7 @@ export const api = {
     quickAdd: (p: {
       file: File; name?: string; position?: string; phone?: string; email?: string;
       source?: string; experience_years?: number | null; job_description?: string;
+      owner_user_id?: number | null;
     }) => {
       const fd = new FormData();
       Object.entries({ ...p, file: undefined }).forEach(([k, v]) => {

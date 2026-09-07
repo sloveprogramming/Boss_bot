@@ -14,6 +14,12 @@ class CandidateCreate(BaseModel):
     source_url: Optional[str] = None   # 外部来源URL
     experience_years: Optional[float] = None  # 工作年限
     tags: List[str] = []               # 技能标签列表
+    owner_user_id: Optional[int] = None  # 负责人HR id（仅 admin 指派有效；HR 建默认自己，忽略传入）
+
+
+class CandidateOwnerUpdate(BaseModel):
+    """改派候选人负责人的请求体（仅 admin 可操作）"""
+    owner_user_id: int                 # 新负责人用户 id（须为存在且启用的 admin/hr）
 
 
 class CandidateUpdate(BaseModel):
@@ -44,6 +50,7 @@ class CandidateResponse(BaseModel):
     tags: List[str] = []
     talent_pool_id: Optional[int] = None
     talent_pool_reason: Optional[str] = None
+    owner_user_id: Optional[int] = None  # 负责人HR用户id
     created_at: datetime
     updated_at: datetime
 

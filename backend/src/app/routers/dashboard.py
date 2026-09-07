@@ -5,9 +5,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timedelta
 from app.database import get_db
 from app.config import settings
-from app.models import Candidate
+from app.models import Candidate, User
 from app.models import UserRole
-from app.dependencies import require_role
+from app.dependencies import (
+    require_role, get_current_user, candidate_scope_cond,
+)
 
 router = APIRouter(
     prefix="/api/dashboard",
@@ -17,7 +19,10 @@ router = APIRouter(
 
 
 @router.get("/stats")
-async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
+async def get_dashboard_stats(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """获取仪表盘统计数据：
     - 候选人总数
     - 今日新增
@@ -25,13 +30,20 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
     - 录取率
     - 状态分布
     - 本周趋势
+
+    HR 仅统计自己名下候选人；admin 全量。
     """
+    cond = candidate_scope_cond(current_user)
+
+    def _apply(stmt):
+        return stmt.where(cond) if cond is not None else stmt
+
     # 候选人总数
-    total = (await db.execute(select(func.count(Candidate.id)))).scalar() or 0
+    total = (await db.execute(_apply(select(func.count(Candidate.id))))).scalar() or 0
 
     # 各状态候选人数量分布
     status_result = await db.execute(
-        select(Candidate.status, func.count(Candidate.id))
+        _apply(select(Candidate.status, func.count(Candidate.id)))
         .group_by(Candidate.status)
     )
     status_counts = dict(status_result.all())
@@ -39,14 +51,18 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
     # 今日新增候选人
     today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     today_new = (await db.execute(
-        select(func.count(Candidate.id))
-        .where(Candidate.created_at >= today_start)
+        _apply(
+            select(func.count(Candidate.id))
+            .where(Candidate.created_at >= today_start)
+        )
     )).scalar() or 0
 
     # 所有已评分候选人的平均匹配分
     avg_score = (await db.execute(
-        select(func.avg(Candidate.match_score))
-        .where(Candidate.match_score.isnot(None))
+        _apply(
+            select(func.avg(Candidate.match_score))
+            .where(Candidate.match_score.isnot(None))
+        )
     )).scalar() or 0
 
     # 本周每天新增候选人趋势
@@ -56,9 +72,11 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
         day = week_start + timedelta(days=i)
         next_day = day + timedelta(days=1)
         count = (await db.execute(
-            select(func.count(Candidate.id))
-            .where(Candidate.created_at >= day)
-            .where(Candidate.created_at < next_day)
+            _apply(
+                select(func.count(Candidate.id))
+                .where(Candidate.created_at >= day)
+                .where(Candidate.created_at < next_day)
+            )
         )).scalar() or 0
         trends.append({
             "date": day.strftime("%Y-%m-%d"),
@@ -101,7 +119,10 @@ def _bucket_of(score: float, bucket_size: int = 10) -> int:
 
 
 @router.get("/score-buckets")
-async def get_score_buckets(db: AsyncSession = Depends(get_db)):
+async def get_score_buckets(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """分桶通过率报表 — 评分体系数据闭环的核心指标
 
     按总分 10 分一档统计面试结果（来源：supervisor 决策回流到
@@ -109,12 +130,16 @@ async def get_score_buckets(db: AsyncSession = Depends(get_db)):
     - 每档样本量 / 通过率
     - 跨档倒挂检测（低分档通过率 ≥ 高分档 → 提示阈值/权重可能有问题）
     - 标注不足提示（样本 < 30 时只展示不建议）
+
+    HR 仅统计自己名下候选人的标签样本；admin 全量。
     """
     from app.models import Resume
 
-    result = await db.execute(
-        select(Resume).where(Resume.match_analysis.isnot(None))
-    )
+    query = select(Resume).join(Candidate, Resume.candidate_id == Candidate.id)
+    cond = candidate_scope_cond(current_user)
+    if cond is not None:
+        query = query.where(cond)
+    result = await db.execute(query.where(Resume.match_analysis.isnot(None)))
     resumes = result.scalars().all()
 
     # 聚合：bucket → [total, passed]

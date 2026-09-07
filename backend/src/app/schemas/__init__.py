@@ -6,7 +6,7 @@ from app.schemas.auth import (
 from app.schemas.candidate import (
     CandidateCreate, CandidateUpdate, CandidateResponse, CandidateListResponse,
     TalentPoolResponse, TalentPoolListResponse,
-    ReactivateRequest, TalentPoolCreateRequest,
+    ReactivateRequest, TalentPoolCreateRequest, CandidateOwnerUpdate,
 )
 from app.schemas.resume import (
     ResumeUploadResponse, ResumeAnalysisResult, MatchAnalysis,
@@ -35,7 +35,7 @@ __all__ = [
     # candidate / talent pool
     "CandidateCreate", "CandidateUpdate", "CandidateResponse", "CandidateListResponse",
     "TalentPoolResponse", "TalentPoolListResponse",
-    "ReactivateRequest", "TalentPoolCreateRequest",
+    "ReactivateRequest", "TalentPoolCreateRequest", "CandidateOwnerUpdate",
     # resume
     "ResumeUploadResponse", "ResumeAnalysisResult", "MatchAnalysis",
     "ResumeAnalysisResponse", "ResumeAnalysisRequest",
