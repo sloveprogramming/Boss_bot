@@ -1,3 +1,5 @@
+# 【小白导读】SSE（Server-Sent Events）工具箱：把进度/Token/结果打包成标准事件格式
+#   通过 HTTP 长连接推给前端。简历分析、JD 生成的"打字机+进度条"效果都靠它。
 """SSE (Server-Sent Events) 流式输出工具
 
 提供统一的 SSE 事件生成器和 StreamingResponse 工厂，

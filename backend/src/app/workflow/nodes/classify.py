@@ -1,3 +1,6 @@
+# 【小白导读】第 2 站：让 LLM 判断这份简历属于哪类岗位（销售/研发/运营…），
+#   岗位类别决定后续用哪套评分权重。本文件还包含 route_to_analyzers：
+#   它用 LangGraph 的 Send 机制把"3 路并行分析"同时发出（并发分叉点就在这）。
 """岗位分类节点调独立 Classifier Agent → 或 → 用内联关键词+LLM 分类"""
 import logging
 from ..state import RecruitmentState

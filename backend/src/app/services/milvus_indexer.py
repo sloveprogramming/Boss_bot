@@ -1,3 +1,6 @@
+# 【小白导读】Milvus 向量库的写入器：文本 → embedding 向量 → 存进 Milvus。
+#   embedding 概念：把一段文字变成一串数字（向量），语义相近的文字向量距离也近，
+#   这样"招聘制度"和"入职规定"就能被检索配对。RAG 检索的地基。
 """轻量文档索引 — 同步写入 Milvus（避免 asyncio 循环冲突）"""
 import hashlib
 import logging

@@ -1,3 +1,8 @@
+# ═══════════════════════════════════════════════════════════════
+# 【小白导读】人才池表——"现在不合适，但值得保持联系"的候选人存放处。
+#   工作流里 40~60 分的候选人会被 move_to_talent_pool 节点写进这张表；
+#   HR 之后可以重新激活（reactivate_from_pool，见 routers/workflow.py）。
+# ═══════════════════════════════════════════════════════════════
 """人才池模型"""
 from datetime import datetime
 from sqlalchemy import Column, Integer, String, DateTime, Float, Text, JSON, Boolean

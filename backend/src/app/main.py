@@ -13,14 +13,8 @@ from app.logging_config import setup_logging
 
 logger = logging.getLogger(__name__)
 
-
-# ═══════════════════════════════════════════════════════════════
-# 【小白导读】lifespan（生命周期）：FastAPI 的"开机/关机钩子"。
-#   yield 之前的代码在服务启动时执行一次（准备资源），
-#   yield 之后的代码在服务关闭时执行一次（清理资源）。
-#   本项目开机时做了 4 件事：配日志 → 建目录 → 建数据库表 → 启动后台定时任务。
-# ═══════════════════════════════════════════════════════════════
-@asynccontextmanager
+@asynccontextmanager # 异步上下文管理器，用于管理应用生命周期
+# 应用生命周期管理：启动时初始化资源，关闭时清理
 async def lifespan(app: FastAPI):
     """应用生命周期管理：启动时初始化资源，关闭时清理
 
@@ -33,18 +27,20 @@ async def lifespan(app: FastAPI):
     关闭时：
     - 停止定时任务
     """
-    # ==== 启动阶段 ====
+   # 启动日志
     setup_logging()
+    # 查看是否携带JWT令牌
     if not settings.JWT_SECRET:
         raise RuntimeError("JWT_SECRET must be configured before starting the API")
     os.makedirs("uploads/resumes", exist_ok=True)  # 简历上传目录
     os.makedirs("dco_document", exist_ok=True)     # 制度文档目录
 
+    # 启动各个数据库
     await init_db()  # 初始化数据库表
     logger.info("[%s] 数据库初始化完成", settings.APP_NAME)
     logger.info("[%s] LLM提供商: %s", settings.APP_NAME, settings.LLM_PROVIDER)
 
-    # 播种可配置邮件模板：内置 7 套迁入 notification_templates 表（仅缺失时插入，不覆盖用户编辑）
+    # 插入七个邮件模版，有则不插入
     try:
         from app.services.notification_template_svc import ensure_default_templates
         async with async_session_factory() as seed_session:
@@ -54,7 +50,17 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("[%s] 邮件模板播种失败（不影响启动）", settings.APP_NAME)
 
-    # 启动后台定时任务（每5分钟检查一次）
+    # 播种 11 个在招岗位的标准 JD（供简历分析自动套用；有则只补缺失、不覆盖已编辑）
+    try:
+        from app.services.position_jd_svc import ensure_default_position_jds
+        async with async_session_factory() as seed_session:
+            inserted, existed = await ensure_default_position_jds(seed_session)
+            await seed_session.commit()
+        logger.info("[%s] 岗位JD库播种完成: 新增 %d 条, 已存在 %d 条", settings.APP_NAME, inserted, existed)
+    except Exception:
+        logger.exception("[%s] 岗位JD库播种失败（不影响启动）", settings.APP_NAME)
+
+    # 定时去拉取答题记录
     from app.services import ScheduledTasks
     task_runner = ScheduledTasks(async_session_factory)
     asyncio.create_task(task_runner.start(interval_seconds=300))
@@ -115,7 +121,7 @@ async def request_logging_middleware(request: Request, call_next):
 # 【小白导读】include_router = 把各功能模块的接口"挂"到主应用上。
 #   每个 router 文件定义自己的 URL 前缀（如 /api/candidates）。
 #   启动服务后打开 http://localhost:18000/docs 可视化浏览全部接口。
-from app.routers import candidates, resumes, questionnaires, interviews, policy_agent, workflow, dashboard, auth, llm_observability, exam_analysis, scoring, jd_generator, notification_templates
+from app.routers import candidates, resumes, questionnaires, interviews, policy_agent, workflow, dashboard, auth, llm_observability, exam_analysis, scoring, jd_generator, notification_templates, position_jds
 
 app.include_router(candidates.router)                # 候选人管理API
 app.include_router(resumes.router)                   # 简历上传与分析API
@@ -130,6 +136,7 @@ app.include_router(exam_analysis.router)              # 试卷分析API
 app.include_router(scoring.router)                    # 评分优化API
 app.include_router(jd_generator.router)               # JD生成API
 app.include_router(notification_templates.router)     # 可配置邮件模板API
+app.include_router(position_jds.router)               # 可配置岗位JD库API
 
 
 @app.get("/api/health")

@@ -1,3 +1,5 @@
+# 【小白导读】RAG 服务的两张表：PolicyDocument（文档登记+索引状态）、
+#   PolicyChatHistory（问答历史，支撑多轮对话与回看）。
 """企业制度相关模型 — 独立 RAG 服务版"""
 from datetime import datetime
 from sqlalchemy import Column, Integer, String, DateTime, Text, JSON, Boolean

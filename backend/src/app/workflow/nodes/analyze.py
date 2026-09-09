@@ -1,3 +1,6 @@
+# 【小白导读】第 3 站：3 个子 Agent 并行分析（基本信息/技能/经验），
+#   各自只写 state 里自己的 key；synthesize_analysis_node 汇总三者、
+#   调 scoring.py 算总分并写库。真正调 LLM 的是 services/resume_analyzer.py。
 """简历分析节点 — 3 个 Agent 并行分析 + 综合汇总
 
 classify 之后拆成 3 路并行（基本信息、技能、经验），LangGraph 自动等 3 路都跑完

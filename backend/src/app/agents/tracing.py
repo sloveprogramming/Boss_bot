@@ -1,3 +1,5 @@
+# 【小白导读】LLM 可观测性的"记账员"：trace_llm_call 装饰器包住每次 LLM 调用，
+#   自动记录输入输出、token 估算、耗时，写入 llm_logs 表（可选同步 Langfuse）。
 """LLM 调用链路追踪 — @trace_llm_call 装饰器
 
 使用方式：

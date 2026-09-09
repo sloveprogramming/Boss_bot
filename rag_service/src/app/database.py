@@ -1,3 +1,5 @@
+# 【小白导读】RAG 服务自己的数据库连接（与主后端共用同一个 MySQL 库，
+#   但这里是独立实例，两个服务互不干扰）。
 """rag_service 数据库 — SQLAlchemy 异步引擎
 
 与主 Backend 共享同一 MySQL 数据库，

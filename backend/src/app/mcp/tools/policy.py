@@ -1,3 +1,4 @@
+# 【小白导读】工具：让 AI 能查询公司制度（内部转发 RAG 服务的问答接口）。
 """MCP Tool — 制度文档 RAG 检索（桥接 RAG Service :18003）
 
 把 RAG 服务作为 Function Calling 的一个工具暴露：

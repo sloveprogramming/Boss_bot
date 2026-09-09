@@ -1,3 +1,8 @@
+# ═══════════════════════════════════════════════════════════════
+# 【小白导读】LLM 调用日志表——"AI 花了多少钱、多长时间、答了什么"的全量台账。
+#   写入方：agents/tracing.py 的装饰器；查询方：routers/llm_observability.py。
+#   做 AI 应用必备的可观测性基础设施。
+# ═══════════════════════════════════════════════════════════════
 """LLM 调用日志模型 — 用于可观测性和成本追踪"""
 from datetime import datetime
 from sqlalchemy import Column, Integer, String, DateTime, Text, JSON, Float

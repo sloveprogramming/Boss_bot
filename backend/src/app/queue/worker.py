@@ -1,3 +1,6 @@
+# 【小白导读】队列的"搬运工"进程（独立于 API 进程运行）：
+#   从 RabbitMQ 取简历分析任务 → 构建 State → 跑招聘工作流 → 更新任务进度表。
+#   好处：LLM 再慢也不占用 API 进程；worker 崩了任务还在队列里不丢。
 """简历分析 Worker（独立进程）— 消费 RabbitMQ 任务并运行 LangGraph
 
 启动方式：
@@ -20,6 +23,7 @@ import traceback
 from app.config import settings
 from app.database import async_session_factory, init_db
 from app.models import Candidate, TaskProgress, TaskStatus
+from app.services.position_jd_svc import resolve_jd_with_manual
 from app.workflow import RecruitmentState, recruitment_graph
 from app.queue.broker import (
     BrokerUnavailable,
@@ -102,6 +106,10 @@ async def _handle_message(message):
         candidate = (await db.execute(
             select(Candidate).where(Candidate.id == candidate_id)
         )).scalar_one_or_none()
+        # 岗位 JD 自动套用（第二道网）：消息里的手填 JD 优先，为空则按应聘岗位
+        # 从「岗位 JD 库」取标准 JD（与 API 路由的解析保持一致）
+        if candidate is not None:
+            job_description = await resolve_jd_with_manual(db, candidate.position, job_description)
 
     if candidate is None:
         await _update_task(task_id, candidate_id, status=TaskStatus.FAILURE.value,

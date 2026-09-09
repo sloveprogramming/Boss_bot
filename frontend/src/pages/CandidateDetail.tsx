@@ -105,7 +105,8 @@ export default function CandidateDetail() {
   const runAnalyze = async () => {
     const rid = resumeId ?? resume?.id;
     if (!rid) return;
-    if (!jd.trim()) { toast("请先粘贴岗位 JD", "err"); return; }
+    // 岗位 JD 可留空：后端会按候选人「应聘岗位」自动套用「岗位 JD 库」的标准 JD；
+    // 手填了 JD 则后端优先使用手填内容。
     setBusy("analyze"); setJdOpen(false);
     try {
       const { data } = await api.resumes.analyze(rid, jd);
@@ -328,12 +329,15 @@ export default function CandidateDetail() {
         </div>
       </Modal>
 
-      {/* JD 输入弹窗 */}
-      <Modal open={jdOpen} onClose={() => setJdOpen(false)} title="岗位 JD（用于 AI 匹配分析）">
-        <Field label="岗位描述">
+      {/* JD 输入弹窗（可留空：自动套用「岗位 JD 库」中该应聘岗位的标准 JD） */}
+      <Modal open={jdOpen} onClose={() => setJdOpen(false)} title="AI 匹配分析（岗位 JD 可留空）">
+        <Field label="岗位描述（可选）">
           <Textarea rows={8} value={jd} onChange={(e) => setJd(e.target.value)}
-            placeholder="粘贴岗位 JD，AI 将据此对候选人简历做多维匹配打分…" />
+            placeholder="粘贴岗位 JD 可覆盖自动匹配；留空将自动套用「岗位 JD 库」中该应聘岗位的标准 JD" />
         </Field>
+        <p className="text-xs text-slate-400 -mt-2 mb-3 leading-5">
+          留空时，后端会按候选人「应聘岗位」自动套用「岗位 JD 库」里的标准 JD 进行分析；手填了 JD 则优先使用手填内容。
+        </p>
         <div className="flex justify-end gap-2 mt-4">
           <Button variant="ghost" onClick={() => setJdOpen(false)}>取消</Button>
           <Button onClick={runAnalyze}>开始分析</Button>

@@ -1,3 +1,6 @@
+# 【小白导读】面试评审：3 个评审 Agent 并行打分（技术/沟通/文化），
+#   supervisor_decision_node 汇总三路意见做最终录用决策，并回写候选人状态、发通知。
+#   route_to_reviewers 是 Send 并发分叉点。这是新版决策链路（旧版见 decision.py）。
 """面试评审节点 — 3 个 Agent 并行打分 + Supervisor 拍板
 
 面试完成后拆成 3 路并行：

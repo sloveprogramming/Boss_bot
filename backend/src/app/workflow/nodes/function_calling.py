@@ -1,3 +1,6 @@
+# 【小白导读】Function Calling 节点：用户说"查一下今天有面试的人"这种自然语言，
+#   LLM 决定调哪个工具（MCP 工具见 mcp/tools/），拿到结果再组织成人话回答。
+#   这是"AI 会用工具"的实现入口。
 """Function Calling 节点 — ReAct 多轮工具循环
 
 核心改进（相对旧版固定 2 步）：
@@ -66,7 +69,7 @@ async def run_function_calling(
                  由 session_memory 注入，让"刚才那个人"这类指代可解析
         user: 发起者（用于工具数据范围隔离）；None=受信全量
     """
-    tools = get_tool_definitions_openai()
+    tools = await get_tool_definitions_openai()
     system = system_prompt or FC_SYSTEM_PROMPT
 
     # 历史上下文 + 本次输入

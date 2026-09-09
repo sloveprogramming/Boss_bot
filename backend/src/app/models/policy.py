@@ -1,3 +1,8 @@
+# ═══════════════════════════════════════════════════════════════
+# 【小白导读】制度文档表——RAG 问答的"原料登记表"。
+#   · 上传的制度文档先在这里登记（元数据+状态），再由 rag_service 切块向量化进 Milvus。
+#   · status 记录索引进度：uploaded → indexing → indexed / failed。
+# ═══════════════════════════════════════════════════════════════
 """企业制度相关模型"""
 from datetime import datetime
 from sqlalchemy import Column, Integer, String, DateTime, Text, JSON, ForeignKey, Boolean

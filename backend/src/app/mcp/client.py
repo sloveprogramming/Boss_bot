@@ -1,12 +1,20 @@
+# 【小白导读】MCP 的客户端侧封装。
+#   · get_tool_definitions_openai：从 FastMCP 注册表动态导出工具清单，
+#     转成 OpenAI Function Calling 格式——工具在 server.py 用 @mcp.tool()
+#     注册后自动出现在这里，再也不用手工维护 TOOL_DEFINITIONS。
+#   · execute_tool_directly：内部直连通道——LangGraph 节点跳过 MCP 协议
+#     直接调 tools/ 里的实现函数（零协议开销），并支持注入 user 做行级数据权限。
 """MCP 客户端 — 供 Backend 内部调用 MCP Tools
 
 支持两种模式：
-- 直接调用（嵌入式，零开销，LangGraph 节点使用）
-- MCP 协议连接（stdio，外部 MCP Client 使用）
+- 直接调用（嵌入式，零开销，LangGraph 节点使用；DIRECT_TOOLS → tools/ 实现函数）
+- MCP 协议连接（stdio，外部 MCP Client 使用；工具经 @mcp.tool() 装饰器注册）
 """
 import inspect
 import json
 from typing import Any, Optional
+
+from app.mcp.mcp_app import mcp
 from app.mcp.tools import (
     query_policy_docs,
     query_candidates,
@@ -16,9 +24,8 @@ from app.mcp.tools import (
     send_email,
     jd_reference_search,
 )
-from app.mcp import TOOL_DEFINITIONS
 
-# 工具函数直连映射（无 MCP 协议开销）
+# 工具函数直连映射（无 MCP 协议开销；实现函数支持 user 注入做行级隔离）
 DIRECT_TOOLS = {
     "query_candidates": query_candidates,
     "get_candidate_detail": get_candidate_detail,
@@ -29,19 +36,24 @@ DIRECT_TOOLS = {
     "jd_reference_search": jd_reference_search,
 }
 
-# 工具定义（OpenAI Function Calling 格式）
-def get_tool_definitions_openai() -> list[dict[str, Any]]:
-    """获取 OpenAI Function Calling 格式的工具定义"""
+
+async def get_tool_definitions_openai() -> list[dict[str, Any]]:
+    """获取 OpenAI Function Calling 格式的工具定义
+
+    数据来源：FastMCP 注册表（mcp.list_tools()）。
+    server.py 里用 @mcp.tool() 注册的工具会自动出现在这里。
+    """
+    tools = await mcp.list_tools()
     return [
         {
             "type": "function",
             "function": {
-                "name": td["name"],
-                "description": td["description"],
-                "parameters": td["inputSchema"],
+                "name": t.name,
+                "description": t.description,
+                "parameters": t.inputSchema,
             },
         }
-        for td in TOOL_DEFINITIONS
+        for t in tools
     ]
 
 

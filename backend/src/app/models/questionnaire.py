@@ -1,3 +1,9 @@
+# ═══════════════════════════════════════════════════════════════
+# 【小白导读】问卷两张表：
+#   · Questionnaire：发给候选人的问卷实例（题目是 JSON 列，AI 动态生成的）。
+#   · QuestionnaireResponse：候选人的作答 + AI 批卷结果（score/passed）。
+#   一份问卷对应一条回复记录，通过 questionnaire_id 关联。
+# ═══════════════════════════════════════════════════════════════
 """问卷相关模型"""
 from datetime import datetime
 from sqlalchemy import Column, Integer, String, DateTime, Text, JSON, ForeignKey, Float, Boolean

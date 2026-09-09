@@ -1,3 +1,5 @@
+# 【小白导读】人才池节点：40~60 分的候选人写进 talent_pool 表 + 更新状态，
+#   留待 HR 日后重新激活。
 """人才池节点"""
 import logging
 from ..state import RecruitmentState

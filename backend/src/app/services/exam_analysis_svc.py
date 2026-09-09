@@ -1,3 +1,5 @@
+# 【小白导读】试卷分析业务逻辑：解析答卷数据、算分数维度、生成分析报告。
+#   被 routers/exam_analysis.py 和定时同步 workmenul_sync.py 调用。
 """试卷分析服务 — 调用 Dify Workflow API 分析考试结果"""
 import json
 import logging

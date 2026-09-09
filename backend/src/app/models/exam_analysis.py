@@ -1,3 +1,7 @@
+# ═══════════════════════════════════════════════════════════════
+# 【小白导读】试卷分析表——存外部考试系统（Workmenul）同步来的答卷分析结果。
+#   数据来源：定时任务 workmenul_sync.py 拉取，或 exam_analysis.py 的 webhook 推送。
+# ═══════════════════════════════════════════════════════════════
 """试卷分析模型 — 存储轻速云回调原始数据 + Dify 分析结果"""
 from datetime import datetime
 from sqlalchemy import Column, Integer, String, DateTime, Text, JSON, Float

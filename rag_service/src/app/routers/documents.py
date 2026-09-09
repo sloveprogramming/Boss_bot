@@ -1,3 +1,5 @@
+# 【小白导读】制度文档管理：上传 → 切块向量化入 Milvus（index_document）→
+#   列表 / 删除 / 全量重建索引。是 RAG 的"进货口"。
 """RAG 服务路由 — 文档管理"""
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy import select

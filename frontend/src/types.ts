@@ -384,3 +384,42 @@ export const TEMPLATE_CATEGORY_META: Record<TemplateCategory, { label: string; c
 
 export const templateCategoryLabel = (c: string): string =>
   (TEMPLATE_CATEGORY_META[c as TemplateCategory]?.label) ?? c;
+
+// ===== 可配置岗位 JD 库（简历分析自动套用） =====
+export interface PositionJd {
+  id: number;
+  position: string;
+  aliases: string;
+  category: string;
+  responsibilities: string;
+  requirements: string;
+  salary: string;
+  is_system: boolean;
+  is_active: boolean;
+  created_by?: number | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface PositionJdMatch {
+  matched: boolean;
+  position: string;
+  jd: string;
+  row: PositionJd | null;
+}
+
+/** 岗位 JD 内置分类配色（自定义分类在前端回退为「其他」样式） */
+export const JD_CATEGORY_META: Record<string, { label: string; cls: string }> = {
+  "采购供应链": { label: "采购供应链", cls: "bg-orange-50 text-orange-600" },
+  "销售":       { label: "销售",       cls: "bg-cyan-50 text-cyan-600" },
+  "市场":       { label: "市场",       cls: "bg-violet-50 text-violet-600" },
+  "运营":       { label: "运营",       cls: "bg-blue-50 text-blue-600" },
+  "研发":       { label: "研发",       cls: "bg-amber-50 text-amber-600" },
+  "职能":       { label: "职能",       cls: "bg-slate-100 text-slate-600" },
+  "other":      { label: "其他",       cls: "bg-slate-100 text-slate-600" },
+};
+
+export const JD_CATEGORY_KEYS = ["采购供应链", "销售", "市场", "运营", "研发", "职能"];
+
+export const jdCategoryLabel = (c: string): string =>
+  JD_CATEGORY_META[c]?.label ?? (c && c !== "other" ? c : "未分类");

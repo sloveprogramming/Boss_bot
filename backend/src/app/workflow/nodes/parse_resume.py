@@ -1,3 +1,5 @@
+# 【小白导读】流水线第 1 站：把上传的简历文件（PDF/Word/TXT/图片OCR）变成纯文本，
+#   写入 state.resume_text 供后续所有节点使用。文件解析细节在 services 层。
 """简历解析节点 — 招聘流程的第一个自动化步骤"""
 import logging
 from ..state import RecruitmentState

@@ -12,6 +12,7 @@ from app.models.exam_analysis import ExamAnalysis
 from app.models.task_progress import TaskProgress, TaskStatus
 from app.models.scoring_iteration import ScoringIteration
 from app.models.notification_template import NotificationTemplate
+from app.models.position_jd import PositionJd
 
 __all__ = [
     "Candidate", "CandidateStatus",
@@ -27,4 +28,5 @@ __all__ = [
     "TaskProgress", "TaskStatus",
     "ScoringIteration",
     "NotificationTemplate",
+    "PositionJd",
 ]

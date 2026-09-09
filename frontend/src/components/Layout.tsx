@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
-  LayoutDashboard, Users, GitBranch, CalendarClock, FileText, Mail,
+  LayoutDashboard, Users, GitBranch, CalendarClock, FileText, Mail, FileBadge2,
   Bot, ClipboardCheck, SlidersHorizontal, LogOut, Sparkles, Briefcase, Pencil,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -20,6 +20,7 @@ const NAV: NavItem[] = [
   { to: "/interviews",   label: "面试管理", icon: CalendarClock },
   { to: "/questionnaires", label: "问卷管理", icon: FileText },
   { to: "/email-templates", label: "邮件模板", icon: Mail },
+  { to: "/position-jds", label: "岗位 JD 库", icon: FileBadge2 },
   { to: "/policy-agent", label: "智能助手", icon: Bot },
   { to: "/jd-generator", label: "JD 生成", icon: Briefcase },
   { to: "/exam-analysis", label: "试卷分析", icon: ClipboardCheck },

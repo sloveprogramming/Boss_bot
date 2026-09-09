@@ -367,9 +367,9 @@ export default function Candidates() {
           </Field>
         )}
         {resumeFile && (
-          <Field label="岗位描述（可选，用于 AI 匹配度分析）">
+          <Field label="岗位描述（可留空，自动套用「岗位 JD 库」）">
             <Textarea value={jd} onChange={(e) => setJd(e.target.value)} rows={3}
-              placeholder="粘贴该岗位的职责与要求，AI 将据此评估候选人与岗位的匹配度；留空则按通用岗位分析" />
+              placeholder="粘贴该岗位的职责与要求可覆盖自动匹配；留空将按上方「应聘岗位」自动套用「岗位 JD 库」里的标准 JD 进行分析" />
           </Field>
         )}
         <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-slate-100">

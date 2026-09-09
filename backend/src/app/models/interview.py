@@ -1,3 +1,9 @@
+# ═══════════════════════════════════════════════════════════════
+# 【小白导读】面试表（interviews）——记录一场面试从排期到出结果的全过程。
+#   · proposed_slots 存 AI 生成的可选时段（JSON 列），候选人确认后写入 confirmed_start/end。
+#   · status 状态机：pending → awaiting_confirm → confirmed → completed/cancelled/no_show。
+#   · feedback 用 JSON 存面试官评价，是"评分优化"模块的训练数据来源。
+# ═══════════════════════════════════════════════════════════════
 """面试排期模型"""
 from datetime import datetime
 from sqlalchemy import Column, Integer, String, DateTime, Text, JSON, ForeignKey, Enum

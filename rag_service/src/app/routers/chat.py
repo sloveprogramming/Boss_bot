@@ -1,3 +1,5 @@
+# 【小白导读】制度问答接口：chat（同步等完整答案）/ chat_stream（SSE 流式打字机）
+#   / get_history（多轮对话历史）。检索与生成逻辑在 services/policy_rag.py。
 """RAG 服务路由 — 制度问答（含 SSE 流式输出）"""
 import json
 from fastapi import APIRouter, Depends, HTTPException

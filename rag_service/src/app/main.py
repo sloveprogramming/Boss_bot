@@ -1,4 +1,6 @@
-﻿"""RAG Service — 企业规章制度智能问答独立服务
+# 【小白导读】RAG 服务入口（端口 18003）：独立的 FastAPI 应用，
+#   专做制度问答。前端经 /rag-api 代理访问，主后端经 HTTP 转发调用。
+"""RAG Service — 企业规章制度智能问答独立服务
 
 启动:
     uvicorn app.main:app --app-dir src --host 0.0.0.0 --port 18003

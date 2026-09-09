@@ -12,6 +12,7 @@ import Pipeline from "./pages/Pipeline";
 import Interviews from "./pages/Interviews";
 import Questionnaires from "./pages/Questionnaires";
 import EmailTemplates from "./pages/EmailTemplates";
+import PositionJds from "./pages/PositionJds";
 import PolicyAgent from "./pages/PolicyAgent";
 import ExamAnalysis from "./pages/ExamAnalysis";
 import ScoringInsights from "./pages/ScoringInsights";
@@ -33,6 +34,7 @@ export default function App() {
               <Route path="/interviews" element={<Interviews />} />
               <Route path="/questionnaires" element={<Questionnaires />} />
               <Route path="/email-templates" element={<EmailTemplates />} />
+              <Route path="/position-jds" element={<PositionJds />} />
               <Route path="/policy-agent" element={<PolicyAgent />} />
               <Route path="/exam-analysis" element={<ExamAnalysis />} />
               <Route path="/scoring" element={<ScoringInsights />} />

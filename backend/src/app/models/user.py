@@ -1,3 +1,8 @@
+# ═══════════════════════════════════════════════════════════════
+# 【小白导读】用户表（系统登录账号）。
+#   · role 区分 admin / hr：admin 看全量数据，hr 只看分给自己的候选人（见 dependencies/scope.py）。
+#   · 密码存的是 bcrypt 哈希（dependencies/auth.py 负责加密和校验），绝不存明文。
+# ═══════════════════════════════════════════════════════════════
 """用户与角色模型 — JWT 认证 + RBAC 权限管理"""
 from datetime import datetime
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, Enum

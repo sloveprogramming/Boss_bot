@@ -1,3 +1,11 @@
+# ═══════════════════════════════════════════════════════════════
+# 【小白导读】招聘流水线的 HTTP 入口（本文件较大，按功能分四块）：
+#   1. 触发工作流：start_workflow（单个）/ auto_process（批量），支持 SSE 流式看进度
+#   2. 查询：get_workflow_status / get_pipeline / get_task_progress
+#   3. 人才池管理：列表/详情/联系/重新激活/手动加入
+#   4. Function Calling：自然语言查库发邮件（底层走 MCP 工具）
+#   工作流本体的装配在 workflow/graph.py，这里是"操作台"。
+# ═══════════════════════════════════════════════════════════════
 """招聘流程编排API — 触发 LangGraph 工作流 + 人才池管理
 
 LangGraph 运行在后端进程内，节点直接操作数据库，无需 HTTP 同步。
@@ -29,6 +37,7 @@ from app.schemas import (
     WorkflowStatusResponse,
 )
 from app.services import notification_service
+from app.services.position_jd_svc import resolve_jd_with_manual
 from app.queue.broker import publish_analysis_task, BrokerUnavailable
 
 logger = logging.getLogger(__name__)
@@ -100,14 +109,16 @@ async def start_workflow(
     if not resume_text.strip():
         resume_text = await _load_latest_resume_text(db, candidate_id)
 
-    initial_state = _build_initial_state(candidate, resume_text, job_description)
+    # 岗位 JD 自动套用：手填优先，留空按应聘岗位取「岗位 JD 库」标准 JD
+    effective_jd = await resolve_jd_with_manual(db, candidate.position, job_description)
+    initial_state = _build_initial_state(candidate, resume_text, effective_jd)
 
     # 高并发防护：优先入队（RabbitMQ）；broker 不可用时降级为内联同步
     if settings.TASK_ENABLED:
         try:
             # 只入队，不写 task_progress：进度行统一由 worker 消费时 upsert，
             # 避免 API 与 worker 双写同一 task_id 撞唯一索引。
-            task_id = await publish_analysis_task(candidate_id, resume_text, job_description)
+            task_id = await publish_analysis_task(candidate_id, resume_text, effective_jd)
             logger.info("候选人 %s 工作流已入队 (task_id=%s)", candidate_id, task_id)
             return {
                 "candidate_id": candidate_id,
@@ -215,13 +226,15 @@ async def auto_process(
     if not resume_text.strip():
         resume_text = await _load_latest_resume_text(db, candidate_id)
 
-    initial_state = _build_initial_state(candidate, resume_text, job_description)
+    # 岗位 JD 自动套用：手填优先，留空按应聘岗位取「岗位 JD 库」标准 JD
+    effective_jd = await resolve_jd_with_manual(db, candidate.position, job_description)
+    initial_state = _build_initial_state(candidate, resume_text, effective_jd)
 
     if settings.TASK_ENABLED:
         try:
             # 只入队，不写 task_progress：进度行统一由 worker 消费时 upsert，
             # 避免 API 与 worker 双写同一 task_id 撞唯一索引。
-            task_id = await publish_analysis_task(candidate_id, resume_text, job_description)
+            task_id = await publish_analysis_task(candidate_id, resume_text, effective_jd)
             logger.info("候选人 %s 自动处理已入队 (task_id=%s)", candidate_id, task_id)
             return {
                 "candidate_id": candidate_id,
@@ -521,8 +534,8 @@ async def list_mcp_tools():
     """列出所有可用的 MCP Tools（供 LLM Function Calling 使用）"""
     from app.mcp import get_tool_definitions_openai
     return {
-        "tools": get_tool_definitions_openai(),
-        "total": len(get_tool_definitions_openai()),
+        "tools": await get_tool_definitions_openai(),
+        "total": len(await get_tool_definitions_openai()),
     }
 
 
@@ -654,7 +667,7 @@ async def function_call_stream(
     )
 
     async def generate():
-        tools = get_tool_definitions_openai()
+        tools = await get_tool_definitions_openai()
         system = data.system_prompt or FC_SYSTEM_PROMPT_STREAM
 
         # 短期记忆：有 session_id 时注入该会话最近的历史消息
@@ -832,6 +845,10 @@ async def start_workflow_stream(
     """
     candidate = await ensure_candidate_visible(db, current_user, candidate_id)
 
+    # SSE 响应体在会话关闭后才执行，故在端点体内先把岗位 JD 解析成普通字符串（会话仍可用）
+    # （岗位 JD 自动套用：手填优先，留空按应聘岗位取「岗位 JD 库」标准 JD）
+    effective_jd = await resolve_jd_with_manual(db, candidate.position, job_description)
+
     # 节点列表及其描述
     workflow_steps = [
         ("parse_resume", "解析简历", 10, 30),
@@ -851,7 +868,7 @@ async def start_workflow_stream(
             "status": candidate.status,
             "pipeline_stage": "resume",
             "resume_text": resume_text or "",
-            "job_description": job_description or candidate.position,
+            "job_description": effective_jd or candidate.position,
             "match_score": candidate.match_score or 0,
             "errors": [],
             "retry_count": 0,

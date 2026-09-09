@@ -1,3 +1,6 @@
+# ═══════════════════════════════════════════════════════════════
+# 【小白导读】通知记录表——每次发邮件/短信/机器人消息都留一条底，方便追溯"发没发过"。
+# ═══════════════════════════════════════════════════════════════
 """通知记录模型"""
 from datetime import datetime
 from sqlalchemy import Column, Integer, String, DateTime, Text, JSON, ForeignKey, Boolean

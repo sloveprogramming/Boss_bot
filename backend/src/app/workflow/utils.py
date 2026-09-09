@@ -1,3 +1,4 @@
+# 【小白导读】工作流的小工具函数集合（JSON 安全解析等），被多个节点复用。
 """工作流节点通用工具 — 数据库会话管理、候选人查询等"""
 
 from contextlib import asynccontextmanager

@@ -1,3 +1,6 @@
+# 【小白导读】简历 AI 分析的"发动机"：调用 LLM 分别产出基本信息/技能/经验三路结果，
+#   并提取维度分（skill/experience/stability）。工作流 analyze 节点底层就是它。
+#   提示词模板统一放在 agents/prompts.py。
 """简历解析与分析服务 — 文件解析 + LLM结构化提取 + 匹配度评估
 
 依赖注入：

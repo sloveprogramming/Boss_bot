@@ -1,4 +1,6 @@
-﻿"""rag_service 配置 — 复用项目根目录 .env，与主 Backend 共用同一份配置"""
+# 【小白导读】RAG 服务的独立配置面板（与主后端 config 同思路）：.env 覆盖默认值。
+#   关键项：Milvus 地址、embedding 模型、LLM Key、检索条数等。
+"""rag_service 配置 — 复用项目根目录 .env，与主 Backend 共用同一份配置"""
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional

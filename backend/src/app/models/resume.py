@@ -1,3 +1,8 @@
+# ═══════════════════════════════════════════════════════════════
+# 【小白导读】简历表（resumes）——一位候选人可有多份简历，candidate_id 外键多对一关联。
+#   · raw_text：从 PDF/Word 提取的纯文本；analysis_result：JSON 列存 AI 结构化分析结果。
+#   · JSON 列的好处：字段结构不固定也能直接存，取出来就是 Python dict。
+# ═══════════════════════════════════════════════════════════════
 """简历模型"""
 from datetime import datetime
 from sqlalchemy import Column, Integer, String, DateTime, Text, JSON, ForeignKey

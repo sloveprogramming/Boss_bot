@@ -1,3 +1,9 @@
+# ═══════════════════════════════════════════════════════════════
+# 【小白导读】简历模块：上传 → 解析（PDF/Word/TXT/图片OCR）→ AI 分析。
+#   · analyze_resume：同步等待结果；analyze_resume_stream：SSE 流式看进度。
+#   · quick_add_candidate："传简历自动建候选人"的快捷入口。
+#   · 文件解析细节在 workflow/nodes/parse_resume.py，AI 分析在 services/resume_analyzer.py。
+# ═══════════════════════════════════════════════════════════════
 """简历上传与分析API"""
 import json
 import logging
@@ -12,6 +18,7 @@ from app.dependencies import (
     require_role, get_current_user, ensure_candidate_visible,
 )
 from app.services import resume_analyzer
+from app.services.position_jd_svc import resolve_jd_with_manual
 from app.schemas import ResumeUploadResponse, ResumeAnalysisResponse
 
 logger = logging.getLogger(__name__)
@@ -90,13 +97,14 @@ async def analyze_resume(
     if not resume:
         raise HTTPException(status_code=404, detail="简历不存在")
     # 数据范围校验：候选人须对当前 HR 可见
-    await ensure_candidate_visible(db, current_user, resume.candidate_id)
+    candidate = await ensure_candidate_visible(db, current_user, resume.candidate_id)
 
-    # 执行分析
+    # 执行分析（岗位 JD 自动套用：HR 手填优先，留空按应聘岗位取「岗位 JD 库」标准 JD）
     try:
+        effective_jd = await resolve_jd_with_manual(db, candidate.position, job_description)
         analysis = await resume_analyzer.analyze_resume(
             resume_id=resume_id,
-            job_description=job_description,
+            job_description=effective_jd,
             db=db,
         )
     except ValueError as e:
@@ -282,7 +290,9 @@ async def quick_add_candidate(
 
     warning = None
     try:
-        await resume_analyzer.analyze_resume(resume.id, job_description or "", db)
+        # 岗位 JD 自动套用：手填优先，留空按应聘岗位 position 从库内取标准 JD
+        effective_jd = await resolve_jd_with_manual(db, position, job_description)
+        await resume_analyzer.analyze_resume(resume.id, effective_jd, db)
         # 建档默认状态为 new；AI 分析成功后推进为 analyzed
         # （analyze_resume 仅在 status 为空时才置位，故这里显式过渡）
         if candidate.status == CandidateStatus.NEW.value:
@@ -336,7 +346,11 @@ async def analyze_resume_stream(
     if not resume:
         raise HTTPException(status_code=404, detail="简历不存在")
     # 数据范围校验：候选人须对当前 HR 可见
-    await ensure_candidate_visible(db, current_user, resume.candidate_id)
+    candidate = await ensure_candidate_visible(db, current_user, resume.candidate_id)
+
+    # SSE 响应体在会话关闭后才执行，故在端点体内先把岗位 JD 解析成普通字符串（会话仍可用）
+    # （岗位 JD 自动套用：HR 手填优先，留空按应聘岗位取「岗位 JD 库」标准 JD）
+    effective_jd = await resolve_jd_with_manual(db, candidate.position, job_description)
 
     async def generate():
         from app.agents import llm_client, RESUME_ANALYSIS_SYSTEM, RESUME_ANALYSIS_PROMPT
@@ -350,7 +364,7 @@ async def analyze_resume_stream(
             messages = [
                 {"role": "user", "content": RESUME_ANALYSIS_PROMPT.format(
                     resume_text=resume.raw_text or "",
-                    job_description=job_description or "",
+                    job_description=effective_jd or "",
                 )}
             ]
 

@@ -1,3 +1,5 @@
+# 【小白导读】Workmenul 对接：后台循环定时拉取外部考试系统的答卷，
+#   落库为试卷分析记录（main.py 启动时作为 asyncio 任务跑起来）。
 """Workmenul（自研答题看板）拉取同步 — 把远程终态答卷导入本地「试卷分析」
 
 背景：Workmenul bridge-service 部署在远程云上，其原生的「push 到 Boos_bot」因

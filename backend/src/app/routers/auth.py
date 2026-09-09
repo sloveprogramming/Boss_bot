@@ -1,3 +1,9 @@
+# ═══════════════════════════════════════════════════════════════
+# 【小白导读】认证模块：注册 / 登录 / 当前用户信息 / 改密码。
+#   登录成功后发一个 JWT 令牌（一串加密签名的字符串），前端之后每次请求
+#   在 Header 里带上它，后端用 dependencies/auth.py 的 get_current_user 验明正身。
+#   学习建议：先读 login → 再看 dependencies/auth.py 的 create_access_token/get_current_user。
+# ═══════════════════════════════════════════════════════════════
 """认证 API — 注册 / 登录 / 当前用户 / 修改密码"""
 import logging
 from typing import List, Optional

@@ -1,3 +1,10 @@
+# ═══════════════════════════════════════════════════════════════
+# 【小白导读】候选人表（candidates）——全系统最核心的一张表，一行 = 一位应聘者。
+#   · 简历表、面试表、问卷表都通过 candidate_id 外键挂在这张表上。
+#   · status 是"生命线"：new → analyzed → q_sent/q_done → scheduled/interviewed
+#     → hired/rejected，工作流每个节点推进时都会更新它，招聘管道页按它展示进度。
+#   · owner_user_id 用于数据权限：普通 HR 只能看分给自己的候选人（见 dependencies/scope.py）。
+# ═══════════════════════════════════════════════════════════════
 """候选人模型"""
 # 导入datetime，用于时间戳字段的默认值
 from datetime import datetime

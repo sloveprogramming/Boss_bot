@@ -1,3 +1,8 @@
+# 【小白导读】schemas = Pydantic 模型，负责 API 的"进出门安检"：
+#   请求进来先按这里的类校验字段（类型不对直接返回 422），响应出去也按它序列化。
+#   和 models 的区别：models 描述数据库表长什么样，schemas 描述接口的请求/响应长什么样。
+# 本文件：试卷分析数据的进出格式。
+
 """试卷分析相关 Pydantic Schema"""
 from datetime import datetime
 from typing import Optional, Any, Literal

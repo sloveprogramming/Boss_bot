@@ -1,3 +1,5 @@
+# 【小白导读】问卷通道三节点：generate（AI 出题入库+发邮件）→
+#   wait（轮询数据库等候选人提交）→ score（AI 批卷、写分数、决定是否及格）。
 """问卷节点 """
 import logging
 from ..state import RecruitmentState

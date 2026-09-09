@@ -92,6 +92,7 @@ async def init_db():
             task_progress, # 异步任务进度模型（RabbitMQ 队列）
             scoring_iteration,  # 评分权重迭代模型
             notification_template,  # 可配置邮件模板模型
+            position_jd,    # 可配置岗位JD库模型
         )
         # 创建所有已注册模型的数据库表
         await conn.run_sync(Base.metadata.create_all)

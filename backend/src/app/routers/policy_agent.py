@@ -1,3 +1,9 @@
+# ═══════════════════════════════════════════════════════════════
+# 【小白导读】制度问答（RAG）的后端入口：
+#   · 上传制度文档 → 转发 rag_service(:18003) 索引进 Milvus
+#   · 问答（含 SSE 流式）→ 转发 rag_service，并把会话历史记在数据库
+#   本文件是"调度员"，真正检索/生成逻辑在 rag_service/src/app/services/policy_rag.py。
+# ═══════════════════════════════════════════════════════════════
 """企业制度文档管理 API — 文档入库 + 自动索引 + 简单问答 + 账号会话历史"""
 import os
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query

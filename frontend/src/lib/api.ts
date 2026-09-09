@@ -6,6 +6,7 @@ import type {
   QuestionnaireOverviewItem, ScoringInsights, ScoringIteration, User,
   PolicyChatSession, PolicyChatMessage, OwnerReassignResult,
   EmailTemplate, TemplateCategory, TemplateDraft, TemplatePreviewResult,
+  PositionJd, PositionJdMatch,
 } from "../types";
 
 export const TOKEN_KEY = "recruit_token";
@@ -264,5 +265,21 @@ export const api = {
     generate: (data: { focus: string; code?: string; candidate_name?: string }) =>
       http.post<{ draft: TemplateDraft; whitelist: string[]; unexpected_variables: string[] }>(
         "/api/templates/generate", data),
+  },
+
+  positionJds: {
+    list: (params?: { category?: string; q?: string }) =>
+      http.get<{ items: PositionJd[]; total: number }>("/api/position-jds", { params }),
+    create: (data: {
+      position: string; aliases?: string; category?: string;
+      responsibilities?: string; requirements?: string; salary?: string; is_active?: boolean;
+    }) => http.post<PositionJd>("/api/position-jds", data),
+    update: (id: number, data: Partial<Pick<PositionJd, "position" | "aliases" | "category" | "responsibilities" | "requirements" | "salary" | "is_active">>) =>
+      http.put<PositionJd>(`/api/position-jds/${id}`, data),
+    remove: (id: number) => http.delete<{ success: boolean }>(`/api/position-jds/${id}`),
+    reset: (id: number) => http.post<PositionJd>(`/api/position-jds/${id}/reset`),
+    restoreDefaults: () => http.post<{ inserted: number; existed: number }>("/api/position-jds/restore-defaults"),
+    match: (position: string) =>
+      http.get<PositionJdMatch>("/api/position-jds/match", { params: { position } }),
   },
 };
